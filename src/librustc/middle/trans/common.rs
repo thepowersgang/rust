@@ -188,14 +188,12 @@ pub type ExternMap = HashMap<String, ValueRef>;
 // will only be set in the case of default methods.
 pub struct param_substs {
     pub substs: subst::Substs,
-    pub vtables: typeck::vtable_res,
 }
 
 impl param_substs {
     pub fn empty() -> param_substs {
         param_substs {
             substs: subst::Substs::trans_empty(),
-            vtables: subst::VecPerParamSpace::empty(),
         }
     }
 
@@ -204,15 +202,9 @@ impl param_substs {
     }
 }
 
-fn param_substs_to_string(this: &param_substs, tcx: &ty::ctxt) -> String {
-    format!("param_substs(substs={},vtables={})",
-            this.substs.repr(tcx),
-            this.vtables.repr(tcx))
-}
-
 impl Repr for param_substs {
     fn repr(&self, tcx: &ty::ctxt) -> String {
-        param_substs_to_string(self, tcx)
+        self.substs.repr(tcx)
     }
 }
 
@@ -778,7 +770,8 @@ pub enum ExprOrMethodCall {
 
 pub fn node_id_substs(bcx: Block,
                       node: ExprOrMethodCall)
-                      -> subst::Substs {
+                      -> subst::Substs
+{
     let tcx = bcx.tcx();
 
     let substs = match node {
@@ -798,85 +791,8 @@ pub fn node_id_substs(bcx: Block,
                     substs.repr(bcx.tcx())).as_slice());
     }
 
+    let substs = substs.erase_regions();
     substs.substp(tcx, bcx.fcx.param_substs)
-}
-
-pub fn node_vtables(bcx: Block, id: typeck::MethodCall)
-                 -> typeck::vtable_res {
-    bcx.tcx().vtable_map.borrow().find(&id).map(|vts| {
-        resolve_vtables_in_fn_ctxt(bcx.fcx, vts)
-    }).unwrap_or_else(|| subst::VecPerParamSpace::empty())
-}
-
-// Apply the typaram substitutions in the FunctionContext to some
-// vtables. This should eliminate any vtable_params.
-pub fn resolve_vtables_in_fn_ctxt(fcx: &FunctionContext,
-                                  vts: &typeck::vtable_res)
-                                  -> typeck::vtable_res {
-    resolve_vtables_under_param_substs(fcx.ccx.tcx(),
-                                       fcx.param_substs,
-                                       vts)
-}
-
-pub fn resolve_vtables_under_param_substs(tcx: &ty::ctxt,
-                                          param_substs: &param_substs,
-                                          vts: &typeck::vtable_res)
-                                          -> typeck::vtable_res
-{
-    vts.map(|ds| {
-        resolve_param_vtables_under_param_substs(tcx,
-                                                 param_substs,
-                                                 ds)
-    })
-}
-
-pub fn resolve_param_vtables_under_param_substs(tcx: &ty::ctxt,
-                                                param_substs: &param_substs,
-                                                ds: &typeck::vtable_param_res)
-                                                -> typeck::vtable_param_res
-{
-    ds.iter().map(|d| {
-        resolve_vtable_under_param_substs(tcx,
-                                          param_substs,
-                                          d)
-    }).collect()
-}
-
-
-
-pub fn resolve_vtable_under_param_substs(tcx: &ty::ctxt,
-                                         param_substs: &param_substs,
-                                         vt: &typeck::vtable_origin)
-                                         -> typeck::vtable_origin
-{
-    match *vt {
-        typeck::vtable_static(trait_id, ref vtable_substs, ref sub) => {
-            let vtable_substs = vtable_substs.substp(tcx, param_substs);
-            typeck::vtable_static(
-                trait_id,
-                vtable_substs,
-                resolve_vtables_under_param_substs(tcx, param_substs, sub))
-        }
-        typeck::vtable_param(n_param, n_bound) => {
-            find_vtable(tcx, param_substs, n_param, n_bound)
-        }
-        typeck::vtable_unboxed_closure(def_id) => {
-            typeck::vtable_unboxed_closure(def_id)
-        }
-        typeck::vtable_error => typeck::vtable_error
-    }
-}
-
-pub fn find_vtable(tcx: &ty::ctxt,
-                   ps: &param_substs,
-                   n_param: typeck::param_index,
-                   n_bound: uint)
-                   -> typeck::vtable_origin {
-    debug!("find_vtable(n_param={:?}, n_bound={}, ps={})",
-           n_param, n_bound, ps.repr(tcx));
-
-    let param_bounds = ps.vtables.get(n_param.space, n_param.index);
-    param_bounds.get(n_bound).clone()
 }
 
 pub fn langcall(bcx: Block,

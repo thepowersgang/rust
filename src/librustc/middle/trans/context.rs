@@ -103,7 +103,7 @@ pub struct LocalCrateContext {
     monomorphized: RefCell<HashMap<MonoId, ValueRef>>,
     monomorphizing: RefCell<DefIdMap<uint>>,
     /// Cache generated vtables
-    vtables: RefCell<HashMap<(ty::t, MonoId), ValueRef>>,
+    vtables: RefCell<HashMap<(ty::t,Rc<ty::TraitRef>), ValueRef>>,
     /// Cache of constant strings,
     const_cstr_cache: RefCell<HashMap<InternedString, ValueRef>>,
 
@@ -617,7 +617,7 @@ impl<'b, 'tcx> CrateContext<'b, 'tcx> {
         &self.local.monomorphizing
     }
 
-    pub fn vtables<'a>(&'a self) -> &'a RefCell<HashMap<(ty::t, MonoId), ValueRef>> {
+    pub fn vtables<'a>(&'a self) -> &'a RefCell<HashMap<(ty::t,Rc<ty::TraitRef>), ValueRef>> {
         &self.local.vtables
     }
 
