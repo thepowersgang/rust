@@ -359,6 +359,7 @@ struct Context<'a> {
     features: Vec<&'static str>,
     span_handler: &'a SpanHandler,
     cm: &'a CodeMap,
+    plugin_attributes: Vec<(String, AttributeType)>,
 }
 
 impl<'a> Context<'a> {
@@ -382,6 +383,13 @@ impl<'a> Context<'a> {
                     self.gate_feature(gate, attr.span, desc);
                 }
                 debug!("check_attribute: {:?} is known, {:?}", name, ty);
+                return;
+            }
+        }
+        for &(ref n, ref ty) in self.plugin_attributes.iter() {
+            if &*n == name {
+                // Plugins can't gate attributes, so we don't check for it
+                debug!("check_attribute: {:?} is registered by a plugin, {:?}", name, ty);
                 return;
             }
         }
@@ -685,6 +693,7 @@ impl<'a, 'v> Visitor<'v> for PostExpansionVisitor<'a> {
 
 fn check_crate_inner<F>(cm: &CodeMap, span_handler: &SpanHandler,
                         krate: &ast::Crate,
+                        plugin_attributes: Vec<(String, AttributeType)>,
                         check: F)
                        -> Features
     where F: FnOnce(&mut Context, &ast::Crate)
@@ -693,6 +702,7 @@ fn check_crate_inner<F>(cm: &CodeMap, span_handler: &SpanHandler,
         features: Vec::new(),
         span_handler: span_handler,
         cm: cm,
+        plugin_attributes: plugin_attributes,
     };
 
     let mut accepted_features = Vec::new();
@@ -765,14 +775,14 @@ fn check_crate_inner<F>(cm: &CodeMap, span_handler: &SpanHandler,
 
 pub fn check_crate_macros(cm: &CodeMap, span_handler: &SpanHandler, krate: &ast::Crate)
 -> Features {
-    check_crate_inner(cm, span_handler, krate,
+    check_crate_inner(cm, span_handler, krate, vec!(),
                       |ctx, krate| visit::walk_crate(&mut MacroVisitor { context: ctx }, krate))
 }
 
-pub fn check_crate(cm: &CodeMap, span_handler: &SpanHandler, krate: &ast::Crate)
+pub fn check_crate(cm: &CodeMap, span_handler: &SpanHandler, krate: &ast::Crate, plugin_attributes: Vec<(String, AttributeType)>)
                    -> Features
 {
-    check_crate_inner(cm, span_handler, krate,
+    check_crate_inner(cm, span_handler, krate, plugin_attributes,
                       |ctx, krate| visit::walk_crate(&mut PostExpansionVisitor { context: ctx },
                                                      krate))
 }

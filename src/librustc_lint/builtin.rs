@@ -641,9 +641,21 @@ impl LintPass for UnusedAttributes {
             }
         }
 
+        let plugin_attributes = cx.sess().plugin_attributes;
+        for (ref name, ty) in plugin_attributes {
+            match ty {
+                AttributeType::Whitelisted if attr.check_name(&*name) => {
+                    break;
+                },
+                _ => ()
+            }
+        }
+
         if !attr::is_used(attr) {
             cx.span_lint(UNUSED_ATTRIBUTES, attr.span, "unused attribute");
-            if KNOWN_ATTRIBUTES.contains(&(&attr.name(), AttributeType::CrateLevel)) {
+            if KNOWN_ATTRIBUTES.contains(&(&attr.name(), AttributeType::CrateLevel)) ||
+               cx.sess().plugin_attributes.iter()
+                 .find(|(x, t)| &attr.name() == &x && AttributeType::CrateLevel == t).is_some() {
                 let msg = match attr.node.style {
                     ast::AttrOuter => "crate-level attribute should be an inner \
                                        attribute: add an exclamation mark: #![foo]",
