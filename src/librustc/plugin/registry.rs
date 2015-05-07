@@ -20,6 +20,7 @@ use syntax::codemap::Span;
 use syntax::parse::token;
 use syntax::ptr::P;
 use syntax::ast;
+use syntax::feature_gate::AttributeType;
 
 use std::collections::HashMap;
 use std::borrow::ToOwned;
@@ -54,6 +55,9 @@ pub struct Registry<'a> {
 
     #[doc(hidden)]
     pub llvm_passes: Vec<String>,
+
+    #[doc(hidden)]
+    pub attributes: Vec<(String, AttributeType)>,
 }
 
 impl<'a> Registry<'a> {
@@ -67,6 +71,7 @@ impl<'a> Registry<'a> {
             lint_passes: vec!(),
             lint_groups: HashMap::new(),
             llvm_passes: vec!(),
+            attributes: vec!(),
         }
     }
 
@@ -129,5 +134,18 @@ impl<'a> Registry<'a> {
     /// execute.
     pub fn register_llvm_pass(&mut self, name: &str) {
         self.llvm_passes.push(name.to_owned());
+    }
+
+
+    /// Register an attribute
+    ///
+    /// `Normal` attributes
+    pub fn register_attribute(&mut self, name: String, ty: AttributeType) {
+        if let AttributeType::Gated(..) = ty {
+            self.sess.err("plugin tried to register a gated attribute. \
+                           Only `Normal`, `Whitelisted`, and `CrateLevel` \
+                           attributes are allowed");
+        }
+        self.attributes.push((name, ty));
     }
 }
