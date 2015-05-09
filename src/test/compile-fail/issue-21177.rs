@@ -1,4 +1,4 @@
-// Copyright 2012 The Rust Project Developers. See the COPYRIGHT
+// Copyright 2015 The Rust Project Developers. See the COPYRIGHT
 // file at the top-level directory of this distribution and at
 // http://rust-lang.org/COPYRIGHT.
 //
@@ -8,11 +8,12 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-// aux-build:crateresolve4a-1.rs
-// aux-build:crateresolve4a-2.rs
-#![crate_name="crateresolve4b#0.2"]
-#![crate_type = "lib"]
+trait Trait {
+    type A;
+    type B;
+}
 
-extern crate "crateresolve4a#0.1" as crateresolve4a;
+fn foo<T: Trait<A = T::B>>() { }
+//~^ ERROR: unsupported cyclic reference between types/traits detected
 
-pub fn g() -> isize { crateresolve4a::f() }
+fn main() { }

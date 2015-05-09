@@ -129,7 +129,7 @@ circle to any arbitrary size.
 
 # Static methods
 
-You can also define methods that do not take a `self` parameter. Here’s a
+You can also define static methods that do not take a `self` parameter. Here’s a
 pattern that’s very common in Rust code:
 
 ```
@@ -188,7 +188,7 @@ struct CircleBuilder {
 
 impl CircleBuilder {
     fn new() -> CircleBuilder {
-        CircleBuilder { x: 0.0, y: 0.0, radius: 0.0, }
+        CircleBuilder { x: 0.0, y: 0.0, radius: 1.0, }
     }
 
     fn x(&mut self, coordinate: f64) -> &mut CircleBuilder {

@@ -1,4 +1,4 @@
-// Copyright 2012 The Rust Project Developers. See the COPYRIGHT
+// Copyright 2015 The Rust Project Developers. See the COPYRIGHT
 // file at the top-level directory of this distribution and at
 // http://rust-lang.org/COPYRIGHT.
 //
@@ -8,11 +8,14 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-// aux-build:crateresolve4a-1.rs
-// aux-build:crateresolve4a-2.rs
-#![crate_name="crateresolve4b#0.1"]
-#![crate_type = "lib"]
+struct S;
 
-extern crate "crateresolve4a#0.2" as crateresolve4a;
+trait InOut<T> { type Out; }
 
-pub fn f() -> isize { crateresolve4a::g() }
+fn do_fold<B, F: InOut<B, Out=B>>(init: B, f: F) {}
+
+fn bot<T>() -> T { loop {} }
+
+fn main() {
+    do_fold(bot(), ()); //~ ERROR is not implemented for the type `()`
+}

@@ -1,4 +1,4 @@
-// Copyright 2012-2015 The Rust Project Developers. See the COPYRIGHT
+// Copyright 2015 The Rust Project Developers. See the COPYRIGHT
 // file at the top-level directory of this distribution and at
 // http://rust-lang.org/COPYRIGHT.
 //
@@ -8,10 +8,16 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-struct S<'a, T:'a> {
-    o: &'a Option<T>
+fn identity(a: &u32) -> &u32 { a }
+
+fn print_foo(f: &fn(&u32) -> &u32, x: &u32) {
+    print!("{}", (*f)(x));
 }
 
 fn main() {
-    S { o: &None }; //~ ERROR type annotations or generic parameter binding required
+    let x = &4;
+    let f: fn(&u32) -> &u32 = identity;
+
+    // Didn't print 4 on optimized builds
+    print_foo(&f, x);
 }
