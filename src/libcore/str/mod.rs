@@ -44,8 +44,11 @@ pub trait FromStr {
     #[stable(feature = "rust1", since = "1.0.0")]
     type Err;
 
-    /// Parses a string `s` to return an optional value of this type. If the
-    /// string is ill-formatted, the None is returned.
+    /// Parses a string `s` to return a value of this type.
+    ///
+    /// If parsing succeeds, return the value inside `Ok`, otherwise
+    /// when the string is ill-formatted return an error specific to the
+    /// inside `Err`. The error type is specific to implementation of the trait.
     #[stable(feature = "rust1", since = "1.0.0")]
     fn from_str(s: &str) -> Result<Self, Self::Err>;
 }
@@ -1185,7 +1188,7 @@ fn eq_slice_(a: &str, b: &str) -> bool {
 /// Bytewise slice equality
 /// NOTE: This function is (ab)used in rustc::middle::trans::_match
 /// to compare &[u8] byte slices that are not necessarily valid UTF-8.
-#[lang="str_eq"]
+#[lang = "str_eq"]
 #[inline]
 fn eq_slice(a: &str, b: &str) -> bool {
     eq_slice_(a, b)

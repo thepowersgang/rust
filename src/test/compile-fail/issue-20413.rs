@@ -1,4 +1,4 @@
-// Copyright 2012 The Rust Project Developers. See the COPYRIGHT
+// Copyright 2015 The Rust Project Developers. See the COPYRIGHT
 // file at the top-level directory of this distribution and at
 // http://rust-lang.org/COPYRIGHT.
 //
@@ -8,13 +8,18 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![crate_name="a#0.1"]
-#![crate_type = "lib"]
-
-trait to_strz {
-    fn to_strz() -> String;
+trait Foo {
+  fn answer(self);
 }
 
-impl to_strz for String {
-    fn to_strz() -> String { self.clone() }
+struct NoData<T>;
+//~^ ERROR: parameter `T` is never used
+
+impl<T> Foo for T where NoData<T>: Foo {
+//~^ ERROR: overflow evaluating the requirement
+  fn answer(self) {
+    let val: NoData<T> = NoData;
+  }
 }
+
+fn main() {}

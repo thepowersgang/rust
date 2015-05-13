@@ -131,7 +131,9 @@ prints a [string][strings] to the screen.
     let mut guess = String::new();
 ```
 
-Now we’re getting interesting! There’s a lot going on in this little line. The first thing to notice is that this is a [let statement][let], which is used to create ‘variable bindings’. They take this form:
+Now we’re getting interesting! There’s a lot going on in this little line.
+The first thing to notice is that this is a [let statement][let], which is
+used to create ‘variable bindings’. They take this form:
 
 ```rust,ignore
 let foo = bar;
@@ -171,7 +173,7 @@ bound to: `String::new()`.
 
 [string]: ../std/string/struct.String.html
 
-The `::new()` syntax is uses `::` because this is an ‘associated function’ of
+The `::new()` syntax uses `::` because this is an ‘associated function’ of
 a particular type. That is to say, it’s associated with `String` itself,
 rather than a particular instance of a `String`. Some languages call this a
 ‘static method’.
@@ -271,7 +273,7 @@ information’. Why throw it away? Well, for a basic program, we just want to
 print a generic error, as basically any issue means we can’t continue. The
 [`ok()` method][ok] returns a value which has another method defined on it:
 `expect()`. The [`expect()` method][expect] takes a value it’s called on, and
-if it isn’t a successful one, [`panic!`][panic]s with a message you passed you
+if it isn’t a successful one, [`panic!`][panic]s with a message you
 passed it. A `panic!` like this will cause our program to crash, displaying
 the message.
 
@@ -711,7 +713,7 @@ variety of numbers, we need to give Rust a hint as to the exact type of number
 we want. Hence, `let guess: u32`. The colon (`:`) after `guess` tells Rust
 we’re going to annotate its type. `u32` is an unsigned, thirty-two bit
 integer. Rust has [a number of built-in number types][number], but we’ve
-chosen `u32`. It’s a good default choice for a small positive numer.
+chosen `u32`. It’s a good default choice for a small positive number.
 
 [parse]: ../std/primitive.str.html#method.parse
 [number]: primitive-types.html#numeric-types
@@ -920,7 +922,7 @@ failure. Each contains more information: the successful parsed integer, or an
 error type. In this case, we `match` on `Ok(num)`, which sets the inner value
 of the `Ok` to the name `num`, and then we just return it on the right-hand
 side. In the `Err` case, we don’t care what kind of error it is, so we just
-use `_` intead of a name. This ignores the error, and `continue` causes us
+use `_` instead of a name. This ignores the error, and `continue` causes us
 to go to the next iteration of the `loop`.
 
 Now we should be good! Let’s try:

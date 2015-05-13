@@ -1,4 +1,4 @@
-// Copyright 2012 The Rust Project Developers. See the COPYRIGHT
+// Copyright 2015 The Rust Project Developers. See the COPYRIGHT
 // file at the top-level directory of this distribution and at
 // http://rust-lang.org/COPYRIGHT.
 //
@@ -8,13 +8,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![crate_name="c#0.1"]
-#![crate_type = "lib"]
+// regression test for issue 16974
+#![crate_type(lib)]  //~ ERROR `crate_type` requires a value
 
-extern crate a;
-
-use a::to_strz;
-
-impl to_strz for bool {
-    fn to_strz() -> String { fmt!("%b", self) }
-}
+fn my_lib_fn() {}
