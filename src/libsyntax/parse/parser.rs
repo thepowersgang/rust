@@ -4437,11 +4437,11 @@ impl<'a> Parser<'a> {
     /// - `extern fn`
     /// - etc
     pub fn parse_fn_front_matter(&mut self) -> PResult<(ast::Constness, ast::Unsafety, abi::Abi)> {
+        let unsafety = try!(self.parse_unsafety());
         let is_const_fn = try!(self.eat_keyword(keywords::Const));
         let (constness, unsafety, abi) = if is_const_fn {
-            (Constness::Const, Unsafety::Normal, abi::Rust)
+            (Constness::Const, unsafety, abi::Rust)
         } else {
-            let unsafety = try!(self.parse_unsafety());
             let abi = if try!(self.eat_keyword(keywords::Extern)) {
                 try!(self.parse_opt_abi()).unwrap_or(abi::C)
             } else {
