@@ -5456,9 +5456,14 @@ impl<'a> Parser<'a> {
             } else {
                 abi::Rust
             };
+            let constness = if abi == abi::Rust && try!(self.eat_keyword(keywords::Const) ){
+		Constness::Const
+            } else {
+		Constness::NotConst
+            };
             try!(self.expect_keyword(keywords::Fn));
             let (ident, item_, extra_attrs) =
-                try!(self.parse_item_fn(Unsafety::Unsafe, Constness::NotConst, abi));
+                try!(self.parse_item_fn(Unsafety::Unsafe, constness, abi));
             let last_span = self.last_span;
             let item = self.mk_item(lo,
                                     last_span.hi,
