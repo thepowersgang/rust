@@ -17,7 +17,6 @@ use tcx::block;
 use tcx::pattern::PatNode;
 use tcx::rustc::front::map;
 use tcx::rustc::middle::def;
-use tcx::rustc::middle::def_id::DefId;
 use tcx::rustc::middle::region::CodeExtent;
 use tcx::rustc::middle::pat_util;
 use tcx::rustc::middle::ty::{self, Ty};
@@ -140,11 +139,6 @@ impl<'a,'tcx:'a> Mirror<Cx<'a,'tcx>> for &'tcx hir::Expr {
                 }
             }
 
-            hir::ExprUnary(hir::UnOp::UnUniq, ref arg) => {
-                assert!(!cx.tcx.is_method_call(self.id));
-                ExprKind::Box { place: None, value: arg.to_ref() }
-            }
-
             hir::ExprUnary(op, ref arg) => {
                 if cx.tcx.is_method_call(self.id) {
                     overloaded_operator(cx, self, ty::MethodCall::expr(self.id),
@@ -154,10 +148,10 @@ impl<'a,'tcx:'a> Mirror<Cx<'a,'tcx>> for &'tcx hir::Expr {
                     let op = match op {
                         hir::UnOp::UnNot => UnOp::Not,
                         hir::UnOp::UnNeg => UnOp::Neg,
-                        hir::UnOp::UnUniq | hir::UnOp::UnDeref => {
+                        hir::UnOp::UnDeref => {
                             cx.tcx.sess.span_bug(
                                 self.span,
-                                &format!("operator should have been handled elsewhere {:?}", op));
+                                "UnDeref should have been handled elsewhere");
                         }
                     };
                     ExprKind::Unary { op: op, arg: arg.to_ref() }
@@ -291,13 +285,13 @@ impl<'a,'tcx:'a> Mirror<Cx<'a,'tcx>> for &'tcx hir::Expr {
             hir::ExprField(ref source, name) =>
                 ExprKind::Field { lhs: source.to_ref(),
                                   name: Field::Named(name.node) },
-            hir::ExprTupField(ref source, ident) =>
+            hir::ExprTupField(ref source, index) =>
                 ExprKind::Field { lhs: source.to_ref(),
-                                  name: Field::Indexed(ident.node) },
+                                  name: Field::Indexed(index.node) },
             hir::ExprCast(ref source, _) =>
                 ExprKind::Cast { source: source.to_ref() },
-            hir::ExprBox(ref place, ref value) =>
-                ExprKind::Box { place: place.to_ref(), value: value.to_ref() },
+            hir::ExprBox(ref value) =>
+                ExprKind::Box { value: value.to_ref() },
             hir::ExprVec(ref fields) =>
                 ExprKind::Vec { fields: fields.to_ref() },
             hir::ExprTup(ref fields) =>
@@ -575,13 +569,13 @@ fn convert_var<'a,'tcx:'a>(cx: &mut Cx<'a,'tcx>,
     let temp_lifetime = cx.tcx.region_maps.temporary_scope(expr.id);
 
     match def {
-        def::DefLocal(node_id) => {
+        def::DefLocal(_, node_id) => {
             ExprKind::VarRef {
                 id: node_id,
             }
         }
 
-        def::DefUpvar(id_var, index, closure_expr_id) => {
+        def::DefUpvar(_, id_var, index, closure_expr_id) => {
             debug!("convert_var(upvar({:?}, {:?}, {:?}))", id_var, index, closure_expr_id);
             let var_ty = cx.tcx.node_id_to_type(id_var);
 
@@ -617,7 +611,7 @@ fn convert_var<'a,'tcx:'a>(cx: &mut Cx<'a,'tcx>,
             let region =
                 cx.tcx.mk_region(region);
 
-            let self_expr = match cx.tcx.closure_kind(DefId::local(closure_expr_id)) {
+            let self_expr = match cx.tcx.closure_kind(cx.tcx.map.local_def_id(closure_expr_id)) {
                 ty::ClosureKind::FnClosureKind => {
                     let ref_closure_ty =
                         cx.tcx.mk_ref(region,
@@ -823,7 +817,7 @@ fn capture_freevar<'a,'tcx:'a>(cx: &mut Cx<'a,'tcx>,
                                freevar: &ty::Freevar,
                                freevar_ty: Ty<'tcx>)
                                -> ExprRef<Cx<'a,'tcx>> {
-    let id_var = freevar.def.def_id().node;
+    let id_var = freevar.def.var_id();
     let upvar_id = ty::UpvarId { var_id: id_var, closure_expr_id: closure_expr.id };
     let upvar_capture = cx.tcx.upvar_capture(upvar_id).unwrap();
     let temp_lifetime = cx.tcx.region_maps.temporary_scope(closure_expr.id);

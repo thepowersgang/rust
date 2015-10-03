@@ -150,15 +150,16 @@ let greater_than_forty_two = (0..100)
                              .find(|x| *x > 42);
 
 match greater_than_forty_two {
-    Some(_) => println!("We got some numbers!"),
-    None => println!("No numbers found :("),
+    Some(_) => println!("Found a match!"),
+    None => println!("No match found :("),
 }
 ```
 
 `find` takes a closure, and works on a reference to each element of an
 iterator. This closure returns `true` if the element is the element we're
-looking for, and `false` otherwise. Because we might not find a matching
-element, `find` returns an `Option` rather than the element itself.
+looking for, and `false` otherwise. `find` returns the first element satisfying
+the specified predicate. Because we might not find a matching element, `find`
+returns an `Option` rather than the element itself.
 
 Another important consumer is `fold`. Here's what it looks like:
 
@@ -280,8 +281,7 @@ If you are trying to execute a closure on an iterator for its side effects,
 just use `for` instead.
 
 There are tons of interesting iterator adapters. `take(n)` will return an
-iterator over the next `n` elements of the original iterator. Note that this
-has no side effect on the original iterator. Let's try it out with our infinite
+iterator over the next `n` elements of the original iterator. Let's try it out with our infinite
 iterator from before:
 
 ```rust

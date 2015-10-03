@@ -76,8 +76,16 @@ An identifier is any nonempty Unicode[^non_ascii_idents] string of the following
 [^non_ascii_idents]: Non-ASCII characters in identifiers are currently feature
   gated. This is expected to improve soon.
 
-- The first character has property `XID_start`
-- The remaining characters have property `XID_continue`
+Either
+
+   * The first character has property `XID_start`
+   * The remaining characters have property `XID_continue`
+
+Or
+
+   * The first character is `_`
+   * The identifier is more than one character, `_` alone is not an identifier
+   * The remaining characters have property `XID_continue`
 
 that does _not_ occur in the set of [keywords][keywords].
 
@@ -586,8 +594,8 @@ Rust syntax is restricted in two ways:
 # Crates and source files
 
 Although Rust, like any other language, can be implemented by an interpreter as
-well as a compiler, the only existing implementation is a compiler &mdash;
-from now on referred to as *the* Rust compiler &mdash; and the language has
+well as a compiler, the only existing implementation is a compiler,
+and the language has
 always been designed to be compiled. For these reasons, this section assumes a
 compiler.
 
@@ -674,7 +682,7 @@ There are several kinds of item:
 * [modules](#modules)
 * [functions](#functions)
 * [type definitions](grammar.html#type-definitions)
-* [structures](#structures)
+* [structs](#structs)
 * [enumerations](#enumerations)
 * [constant items](#constant-items)
 * [static items](#static-items)
@@ -881,7 +889,7 @@ mod foo {
     }
 
     use foo::example::iter; // good: foo is at crate root
-//  use example::iter;      // bad:  core is not at the crate root
+//  use example::iter;      // bad:  example is not at the crate root
     use self::baz::foobaz;  // good: self refers to module 'foo'
     use foo::bar::foobar;   // good: foo is at crate root
 
@@ -900,9 +908,10 @@ fn main() {}
 
 ### Functions
 
-A _function item_ defines a sequence of [statements](#statements) and an
-optional final [expression](#expressions), along with a name and a set of
-parameters. Functions are declared with the keyword `fn`. Functions declare a
+A _function item_ defines a sequence of [statements](#statements) and a
+final [expression](#expressions), along with a name and a set of
+parameters. Other than a name, all these are optional.
+Functions are declared with the keyword `fn`. Functions may declare a
 set of *input* [*variables*](#variables) as parameters, through which the caller
 passes arguments into the function, and the *output* [*type*](#types)
 of the value the function will return to its caller on completion.
@@ -921,7 +930,7 @@ An example of a function:
 
 ```
 fn add(x: i32, y: i32) -> i32 {
-    return x + y;
+    x + y
 }
 ```
 
@@ -1155,7 +1164,7 @@ type Point = (u8, u8);
 let p: Point = (41, 68);
 ```
 
-### Structures
+### Structs
 
 A _structure_ is a nominal [structure type](#structure-types) defined with the
 keyword `struct`.
@@ -2092,6 +2101,8 @@ The following configurations must be defined by the implementation:
 * `target_pointer_width = "..."` - Target pointer width in bits. This is set
   to `"32"` for targets with 32-bit pointers, and likewise set to `"64"` for
   64-bit pointers.
+* `target_vendor = "..."` - Vendor of the target, for example `apple`, `pc`, or
+  simply `"unknown"`.
 * `test` - Enabled when compiling the test harness (using the `--test` flag).
 * `unix` - See `target_family`.
 * `windows` - See `target_family`.
@@ -2268,7 +2279,7 @@ The currently implemented features of the reference compiler are:
 * `advanced_slice_patterns` - See the [match expressions](#match-expressions)
                               section for discussion; the exact semantics of
                               slice patterns are subject to change, so some types
-			      are still unstable.
+                              are still unstable.
 
 * `slice_patterns` - OK, actually, slice patterns are just scary and
                      completely unstable.
@@ -2288,6 +2299,9 @@ The currently implemented features of the reference compiler are:
 
 * `box_syntax` - Allows use of `box` expressions, the exact semantics of which
                  is subject to change.
+
+* `cfg_target_vendor` - Allows conditional compilation using the `target_vendor`
+                        matcher which is subject to change.
 
 * `concat_idents` - Allows use of the `concat_idents` macro, which is in many
                     ways insufficient for concatenating identifiers, and may be
@@ -2614,7 +2628,7 @@ comma:
 ### Structure expressions
 
 There are several forms of structure expressions. A _structure expression_
-consists of the [path](#paths) of a [structure item](#structures), followed by
+consists of the [path](#paths) of a [structure item](#structs), followed by
 a brace-enclosed list of one or more comma-separated name-value pairs,
 providing the field values of a new instance of the structure. A field name
 can be any identifier, and is separated from its value expression by a colon.
@@ -2622,13 +2636,13 @@ The location denoted by a structure field is mutable if and only if the
 enclosing structure is mutable.
 
 A _tuple structure expression_ consists of the [path](#paths) of a [structure
-item](#structures), followed by a parenthesized list of one or more
+item](#structs), followed by a parenthesized list of one or more
 comma-separated expressions (in other words, the path of a structure item
 followed by a tuple expression). The structure item must be a tuple structure
 item.
 
 A _unit-like structure expression_ consists only of the [path](#paths) of a
-[structure item](#structures).
+[structure item](#structs).
 
 The following are examples of structure expressions:
 
@@ -3145,7 +3159,7 @@ if` condition is evaluated. If all `if` and `else if` conditions evaluate to
 
 A `match` expression branches on a *pattern*. The exact form of matching that
 occurs depends on the pattern. Patterns consist of some combination of
-literals, destructured arrays or enum constructors, structures and tuples,
+literals, destructured arrays or enum constructors, structs and tuples,
 variable binding specifications, wildcards (`..`), and placeholders (`_`). A
 `match` expression has a *head expression*, which is the value to compare to
 the patterns. The type of the patterns must equal the type of the head
@@ -3469,7 +3483,7 @@ named reference to an [`enum` item](#enumerations).
 ### Recursive types
 
 Nominal types &mdash; [enumerations](#enumerated-types) and
-[structures](#structure-types) &mdash; may be recursive. That is, each `enum`
+[structs](#structure-types) &mdash; may be recursive. That is, each `enum`
 constructor or `struct` field may refer, directly or indirectly, to the
 enclosing `enum` or `struct` type itself. Such recursion has restrictions:
 
@@ -3497,7 +3511,7 @@ let a: List<i32> = List::Cons(7, Box::new(List::Cons(13, Box::new(List::Nil))));
 ### Pointer types
 
 All pointers in Rust are explicit first-class values. They can be copied,
-stored into data structures, and returned from functions. There are two
+stored into data structs, and returned from functions. There are two
 varieties of pointer in Rust:
 
 * References (`&`)
@@ -3897,7 +3911,7 @@ references to boxes are dropped.
 ### Variables
 
 A _variable_ is a component of a stack frame, either a named function parameter,
-an anonymous [temporary](#lvalues,-rvalues-and-temporaries), or a named local
+an anonymous [temporary](#lvalues-rvalues-and-temporaries), or a named local
 variable.
 
 A _local variable_ (or *stack-local* allocation) holds a value directly,
@@ -3931,11 +3945,11 @@ initialized; this is enforced by the compiler.
 The Rust compiler supports various methods to link crates together both
 statically and dynamically. This section will explore the various methods to
 link Rust crates together, and more information about native libraries can be
-found in the [ffi section of the book][ffi].
+found in the [FFI section of the book][ffi].
 
 In one session of compilation, the compiler can generate multiple artifacts
 through the usage of either command line flags or the `crate_type` attribute.
-If one or more command line flag is specified, all `crate_type` attributes will
+If one or more command line flags are specified, all `crate_type` attributes will
 be ignored in favor of only building the artifacts specified by command line.
 
 * `--crate-type=bin`, `#[crate_type = "bin"]` - A runnable executable will be
@@ -3981,7 +3995,7 @@ Note that these outputs are stackable in the sense that if multiple are
 specified, then the compiler will produce each form of output at once without
 having to recompile. However, this only applies for outputs specified by the
 same method. If only `crate_type` attributes are specified, then they will all
-be built, but if one or more `--crate-type` command line flag is specified,
+be built, but if one or more `--crate-type` command line flags are specified,
 then only those outputs will be built.
 
 With all these different kinds of outputs, if crate A depends on crate B, then
@@ -4035,10 +4049,6 @@ dependencies will be used:
 In general, `--crate-type=bin` or `--crate-type=lib` should be sufficient for
 all compilation needs, and the other options are just available if more
 fine-grained control is desired over the output format of a Rust crate.
-
-# Appendix: Rationales and design trade-offs
-
-*TODO*.
 
 # Appendix: Influences
 

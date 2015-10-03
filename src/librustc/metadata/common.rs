@@ -43,9 +43,15 @@ pub const tag_items_data_parent_item: usize = 0x28;
 
 pub const tag_items_data_item_is_tuple_struct_ctor: usize = 0x29;
 
-pub const tag_index: usize = 0x2a;
+pub const tag_items_closure_kind: usize = 0x2a;
 
-// GAP 0x2b, 0x2c, 0x2d, 0x2e
+pub const tag_items_closure_ty: usize = 0x2b;
+
+pub const tag_index: usize = 0x2c;
+
+pub const tag_def_key: usize = 0x2d;
+
+// GAP 0x2e
 
 pub const tag_meta_item_name_value: usize = 0x2f;
 
@@ -137,8 +143,7 @@ enum_from_u32! {
         tag_table_adjustments = 0x61,
         tag_table_moves_map = 0x62,
         tag_table_capture_map = 0x63,
-        tag_table_closure_tys = 0x64,
-        tag_table_closure_kinds = 0x65,
+            // GAP 0x64, 0x65
         tag_table_upvar_capture_map = 0x66,
         tag_table_capture_modes = 0x67,
         // GAP 0x68
@@ -162,12 +167,12 @@ pub const tag_dylib_dependency_formats: usize = 0x106; // top-level only
 // tag_lang_items
 // - tag_lang_items_item
 //   - tag_lang_items_item_id: u32
-//   - tag_lang_items_item_node_id: u32
+//   - tag_lang_items_item_index: u32
 
 pub const tag_lang_items: usize = 0x107; // top-level only
 pub const tag_lang_items_item: usize = 0x73;
 pub const tag_lang_items_item_id: usize = 0x74;
-pub const tag_lang_items_item_node_id: usize = 0x75;
+pub const tag_lang_items_item_index: usize = 0x75;
 pub const tag_lang_items_missing: usize = 0x76;
 
 pub const tag_item_unnamed_field: usize = 0x77;
@@ -180,7 +185,7 @@ pub const tag_mod_child: usize = 0x7b;
 pub const tag_misc_info: usize = 0x108; // top-level only
 pub const tag_misc_info_crate_items: usize = 0x7c;
 
-pub const tag_item_method_provided_source: usize = 0x7d;
+// GAP 0x7d
 pub const tag_item_impl_vtables: usize = 0x7e;
 
 pub const tag_impls: usize = 0x109; // top-level only
@@ -215,7 +220,7 @@ pub struct LinkMeta {
 
 pub const tag_struct_fields: usize = 0x10d; // top-level only
 pub const tag_struct_field: usize = 0x8a;
-pub const tag_struct_field_id: usize = 0x8b;
+// GAP 0x8b
 
 pub const tag_attribute_is_sugared_doc: usize = 0x8c;
 
@@ -259,3 +264,11 @@ pub const tag_defaulted_trait: usize = 0xa4;
 pub const tag_impl_coerce_unsized_kind: usize = 0xa5;
 
 pub const tag_items_data_item_constness: usize = 0xa6;
+
+pub const tag_rustc_version: usize = 0x10f;
+pub fn rustc_version() -> String {
+    format!(
+        "rustc {}",
+        option_env!("CFG_VERSION").unwrap_or("unknown version")
+    )
+}

@@ -245,7 +245,7 @@ fn check_for_bindings_named_the_same_as_variants(cx: &MatchCheckCtxt, pat: &Pat)
                 let pat_ty = cx.tcx.pat_ty(p);
                 if let ty::TyEnum(edef, _) = pat_ty.sty {
                     let def = cx.tcx.def_map.borrow().get(&p.id).map(|d| d.full_def());
-                    if let Some(DefLocal(_)) = def {
+                    if let Some(DefLocal(..)) = def {
                         if edef.variants.iter().any(|variant|
                             variant.name == ident.node.name
                                 && variant.kind() == VariantKind::Unit
@@ -281,11 +281,10 @@ fn check_for_static_nan(cx: &MatchCheckCtxt, pat: &Pat) {
                 Ok(_) => {}
 
                 Err(err) => {
-                    let subspan = p.span.lo <= err.span.lo && err.span.hi <= p.span.hi;
                     span_err!(cx.tcx.sess, err.span, E0471,
                               "constant evaluation error: {}",
                               err.description());
-                    if !subspan {
+                    if !p.span.contains(err.span) {
                         cx.tcx.sess.span_note(p.span,
                                               "in pattern here")
                     }

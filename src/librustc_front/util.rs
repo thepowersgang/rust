@@ -128,10 +128,9 @@ pub fn is_by_value_unop(u: UnOp) -> bool {
 
 pub fn unop_to_string(op: UnOp) -> &'static str {
     match op {
-      UnUniq => "box() ",
-      UnDeref => "*",
-      UnNot => "!",
-      UnNeg => "-",
+        UnDeref => "*",
+        UnNot => "!",
+        UnNeg => "-",
     }
 }
 
@@ -304,12 +303,12 @@ impl<'a, 'v, O: ast_util::IdVisitingOperation> Visitor<'v> for IdVisitor<'a, O> 
         visit::walk_impl_item(self, ii);
     }
 
-    fn visit_lifetime_ref(&mut self, lifetime: &Lifetime) {
+    fn visit_lifetime(&mut self, lifetime: &Lifetime) {
         self.operation.visit_id(lifetime.id);
     }
 
     fn visit_lifetime_def(&mut self, def: &LifetimeDef) {
-        self.visit_lifetime_ref(&def.lifetime);
+        self.visit_lifetime(&def.lifetime);
     }
 
     fn visit_trait_ref(&mut self, trait_ref: &TraitRef) {
@@ -355,13 +354,13 @@ pub fn empty_generics() -> Generics {
 
 // convert a span and an identifier to the corresponding
 // 1-segment path
-pub fn ident_to_path(s: Span, identifier: Ident) -> Path {
+pub fn ident_to_path(s: Span, ident: Ident) -> Path {
     hir::Path {
         span: s,
         global: false,
         segments: vec!(
             hir::PathSegment {
-                identifier: identifier,
+                identifier: ident,
                 parameters: hir::AngleBracketedParameters(hir::AngleBracketedParameterData {
                     lifetimes: Vec::new(),
                     types: OwnedSlice::empty(),

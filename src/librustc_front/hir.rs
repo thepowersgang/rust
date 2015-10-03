@@ -491,8 +491,6 @@ pub type BinOp = Spanned<BinOp_>;
 
 #[derive(Clone, PartialEq, Eq, RustcEncodable, RustcDecodable, Hash, Debug, Copy)]
 pub enum UnOp {
-    /// The `box` operator
-    UnUniq,
     /// The `*` operator for dereferencing
     UnDeref,
     /// The `!` operator for logical inversion
@@ -595,8 +593,8 @@ impl fmt::Debug for Expr {
 
 #[derive(Clone, PartialEq, Eq, RustcEncodable, RustcDecodable, Hash, Debug)]
 pub enum Expr_ {
-    /// First expr is the place; second expr is the value.
-    ExprBox(Option<P<Expr>>, P<Expr>),
+    /// A `box x` expression.
+    ExprBox(P<Expr>),
     /// An array (`[a, b, c, d]`)
     ExprVec(Vec<P<Expr>>),
     /// A function call
@@ -631,7 +629,6 @@ pub enum Expr_ {
     ///
     /// `if expr { block } else { expr }`
     ExprIf(P<Expr>, P<Block>, Option<P<Expr>>),
-    // FIXME #6993: change to Option<Name> ... or not, if these are hygienic.
     /// A while loop, with an optional label
     ///
     /// `'label: while expr { block }`
@@ -639,7 +636,6 @@ pub enum Expr_ {
     /// Conditionless loop (can be exited with break, continue, or return)
     ///
     /// `'label: loop { block }`
-    // FIXME #6993: change to Option<Name> ... or not, if these are hygienic.
     ExprLoop(P<Block>, Option<Ident>),
     /// A `match` block, with a source that indicates whether or not it is
     /// the result of a desugaring, and if so, which kind.
@@ -1055,6 +1051,13 @@ impl PathListItem_ {
     pub fn id(&self) -> NodeId {
         match *self {
             PathListIdent { id, .. } | PathListMod { id, .. } => id
+        }
+    }
+
+    pub fn name(&self) -> Option<Name> {
+        match *self {
+            PathListIdent { name, .. } => Some(name),
+            PathListMod { .. } => None,
         }
     }
 

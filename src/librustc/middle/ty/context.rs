@@ -16,6 +16,7 @@
 use front::map as ast_map;
 use session::Session;
 use lint;
+use metadata::csearch;
 use middle;
 use middle::def::DefMap;
 use middle::def_id::DefId;
@@ -134,6 +135,40 @@ impl<'tcx> Tables<'tcx> {
             closure_kinds: DefIdMap(),
         }
     }
+
+    pub fn closure_kind(this: &RefCell<Self>,
+                        tcx: &ty::ctxt<'tcx>,
+                        def_id: DefId)
+                        -> ty::ClosureKind {
+        // If this is a local def-id, it should be inserted into the
+        // tables by typeck; else, it will be retreived from
+        // the external crate metadata.
+        if let Some(&kind) = this.borrow().closure_kinds.get(&def_id) {
+            return kind;
+        }
+
+        let kind = csearch::closure_kind(tcx, def_id);
+        this.borrow_mut().closure_kinds.insert(def_id, kind);
+        kind
+    }
+
+    pub fn closure_type(this: &RefCell<Self>,
+                        tcx: &ty::ctxt<'tcx>,
+                        def_id: DefId,
+                        substs: &ClosureSubsts<'tcx>)
+                        -> ty::ClosureTy<'tcx>
+    {
+        // If this is a local def-id, it should be inserted into the
+        // tables by typeck; else, it will be retreived from
+        // the external crate metadata.
+        if let Some(ty) = this.borrow().closure_tys.get(&def_id) {
+            return ty.subst(tcx, &substs.func_substs);
+        }
+
+        let ty = csearch::closure_ty(tcx, def_id);
+        this.borrow_mut().closure_tys.insert(def_id, ty.clone());
+        ty.subst(tcx, &substs.func_substs)
+    }
 }
 
 impl<'tcx> CommonTypes<'tcx> {
@@ -235,8 +270,6 @@ pub struct ctxt<'tcx> {
     pub ty_param_defs: RefCell<NodeMap<ty::TypeParameterDef<'tcx>>>,
     pub normalized_cache: RefCell<FnvHashMap<Ty<'tcx>, Ty<'tcx>>>,
     pub lang_items: middle::lang_items::LanguageItems,
-    /// A mapping of fake provided method def_ids to the default implementation
-    pub provided_method_sources: RefCell<DefIdMap<DefId>>,
 
     /// Maps from def-id of a type or region parameter to its
     /// (inferred) variance.
@@ -244,9 +277,6 @@ pub struct ctxt<'tcx> {
 
     /// True if the variance has been computed yet; false otherwise.
     pub variance_computed: Cell<bool>,
-
-    /// A method will be in this list if and only if it is a destructor.
-    pub destructors: RefCell<DefIdSet>,
 
     /// Maps a DefId of a type to a list of its inherent impls.
     /// Contains implementations of methods that are inherent to a type.
@@ -277,7 +307,6 @@ pub struct ctxt<'tcx> {
 
     /// These caches are used by const_eval when decoding external constants.
     pub extern_const_statics: RefCell<DefIdMap<NodeId>>,
-    pub extern_const_variants: RefCell<DefIdMap<NodeId>>,
     pub extern_const_fns: RefCell<DefIdMap<NodeId>>,
 
     pub node_lint_levels: RefCell<FnvHashMap<(NodeId, lint::LintId),
@@ -341,19 +370,8 @@ pub struct ctxt<'tcx> {
     /// constitute it.
     pub fragment_infos: RefCell<DefIdMap<Vec<ty::FragmentInfo>>>,
 }
+
 impl<'tcx> ctxt<'tcx> {
-    pub fn closure_kind(&self, def_id: DefId) -> ty::ClosureKind {
-        *self.tables.borrow().closure_kinds.get(&def_id).unwrap()
-    }
-
-    pub fn closure_type(&self,
-                        def_id: DefId,
-                        substs: &ClosureSubsts<'tcx>)
-                        -> ty::ClosureTy<'tcx>
-    {
-        self.tables.borrow().closure_tys.get(&def_id).unwrap().subst(self, &substs.func_substs)
-    }
-
     pub fn type_parameter_def(&self,
                               node_id: NodeId)
                               -> ty::TypeParameterDef<'tcx>
@@ -474,8 +492,6 @@ impl<'tcx> ctxt<'tcx> {
             ty_param_defs: RefCell::new(NodeMap()),
             normalized_cache: RefCell::new(FnvHashMap()),
             lang_items: lang_items,
-            provided_method_sources: RefCell::new(DefIdMap()),
-            destructors: RefCell::new(DefIdSet()),
             inherent_impls: RefCell::new(DefIdMap()),
             impl_items: RefCell::new(DefIdMap()),
             used_unsafe: RefCell::new(NodeSet()),
@@ -483,7 +499,6 @@ impl<'tcx> ctxt<'tcx> {
             populated_external_types: RefCell::new(DefIdSet()),
             populated_external_primitive_impls: RefCell::new(DefIdSet()),
             extern_const_statics: RefCell::new(DefIdMap()),
-            extern_const_variants: RefCell::new(DefIdMap()),
             extern_const_fns: RefCell::new(DefIdMap()),
             node_lint_levels: RefCell::new(FnvHashMap()),
             transmute_restrictions: RefCell::new(Vec::new()),

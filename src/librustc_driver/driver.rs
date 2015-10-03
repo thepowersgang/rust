@@ -12,7 +12,7 @@ use rustc::front;
 use rustc::front::map as hir_map;
 use rustc_mir as mir;
 use rustc::session::Session;
-use rustc::session::config::{self, Input, OutputFilenames};
+use rustc::session::config::{self, Input, OutputFilenames, OutputType};
 use rustc::session::search_paths::PathKind;
 use rustc::lint;
 use rustc::metadata;
@@ -36,6 +36,7 @@ use super::Compilation;
 
 use serialize::json;
 
+use std::collections::HashMap;
 use std::env;
 use std::ffi::{OsString, OsStr};
 use std::fs;
@@ -117,7 +118,7 @@ pub fn compile_input(sess: Session,
         let arenas = ty::CtxtArenas::new();
         let ast_map = make_map(&sess, &mut hir_forest);
 
-        write_out_deps(&sess, input, &outputs, &id[..]);
+        write_out_deps(&sess, &outputs, &id);
 
         controller_entry_point!(after_write_deps,
                                 sess,
@@ -128,6 +129,10 @@ pub fn compile_input(sess: Session,
                                                                      &expanded_crate,
                                                                      &ast_map.krate(),
                                                                      &id[..]));
+
+        time(sess.time_passes(), "attribute checking", || {
+            front::check_attr::check_crate(&sess, &expanded_crate);
+        });
 
         time(sess.time_passes(), "early lint checks", || {
             lint::check_ast_crate(&sess, &expanded_crate)
@@ -661,7 +666,7 @@ pub fn phase_3_run_analysis_passes<'tcx, F, R>(sess: Session,
          LocalCrateReader::new(&sess, &ast_map).read_crates(krate));
 
     let lang_items = time(time_passes, "language item collection", ||
-                          middle::lang_items::collect_language_items(krate, &sess));
+                          middle::lang_items::collect_language_items(&sess, &ast_map));
 
     let resolve::CrateMap {
         def_map,
@@ -807,16 +812,16 @@ pub fn phase_5_run_llvm_passes(sess: &Session,
                                trans: &trans::CrateTranslation,
                                outputs: &OutputFilenames) {
     if sess.opts.cg.no_integrated_as {
-        let output_type = config::OutputTypeAssembly;
-
+        let mut map = HashMap::new();
+        map.insert(OutputType::Assembly, None);
         time(sess.time_passes(), "LLVM passes", ||
-            write::run_passes(sess, trans, &[output_type], outputs));
+            write::run_passes(sess, trans, &map, outputs));
 
         write::run_assembler(sess, outputs);
 
         // Remove assembly source, unless --save-temps was specified
         if !sess.opts.cg.save_temps {
-            fs::remove_file(&outputs.temp_path(config::OutputTypeAssembly)).unwrap();
+            fs::remove_file(&outputs.temp_path(OutputType::Assembly)).unwrap();
         }
     } else {
         time(sess.time_passes(), "LLVM passes", ||
@@ -847,16 +852,12 @@ fn escape_dep_filename(filename: &str) -> String {
     filename.replace(" ", "\\ ")
 }
 
-fn write_out_deps(sess: &Session,
-                  input: &Input,
-                  outputs: &OutputFilenames,
-                  id: &str) {
-
+fn write_out_deps(sess: &Session, outputs: &OutputFilenames, id: &str) {
     let mut out_filenames = Vec::new();
-    for output_type in &sess.opts.output_types {
+    for output_type in sess.opts.output_types.keys() {
         let file = outputs.path(*output_type);
         match *output_type {
-            config::OutputTypeExe => {
+            OutputType::Exe => {
                 for output in sess.crate_types.borrow().iter() {
                     let p = link::filename_for_input(sess, *output, id,
                                                      outputs);
@@ -867,23 +868,11 @@ fn write_out_deps(sess: &Session,
         }
     }
 
-    // Write out dependency rules to the dep-info file if requested with
-    // --dep-info
-    let deps_filename = match sess.opts.write_dependency_info {
-        // Use filename from --dep-file argument if given
-        (true, Some(ref filename)) => filename.clone(),
-        // Use default filename: crate source filename with extension replaced
-        // by ".d"
-        (true, None) => match *input {
-            Input::File(..) => outputs.with_extension("d"),
-            Input::Str(..) => {
-                sess.warn("can not write --dep-info without a filename \
-                           when compiling stdin.");
-                return
-            },
-        },
-        _ => return,
-    };
+    // Write out dependency rules to the dep-info file if requested
+    if !sess.opts.output_types.contains_key(&OutputType::DepInfo) {
+        return
+    }
+    let deps_filename = outputs.path(OutputType::DepInfo);
 
     let result = (|| -> io::Result<()> {
         // Build a list of files used to compile the output and
@@ -896,8 +885,15 @@ fn write_out_deps(sess: &Session,
                                    .collect();
         let mut file = try!(fs::File::create(&deps_filename));
         for path in &out_filenames {
-            try!(write!(&mut file,
+            try!(write!(file,
                         "{}: {}\n\n", path.display(), files.join(" ")));
+        }
+
+        // Emit a fake target for each input file to the compilation. This
+        // prevents `make` from spitting out an error if a file is later
+        // deleted. For more info see #28735
+        for path in files {
+            try!(writeln!(file, "{}:", path));
         }
         Ok(())
     })();
@@ -1012,11 +1008,15 @@ pub fn build_output_filenames(input: &Input,
                 out_filestem: stem,
                 single_output_file: None,
                 extra: sess.opts.cg.extra_filename.clone(),
+                outputs: sess.opts.output_types.clone(),
             }
         }
 
         Some(ref out_file) => {
-            let ofile = if sess.opts.output_types.len() > 1 {
+            let unnamed_output_types = sess.opts.output_types.values()
+                                           .filter(|a| a.is_none())
+                                           .count();
+            let ofile = if unnamed_output_types > 1 {
                 sess.warn("ignoring specified output filename because multiple \
                            outputs were requested");
                 None
@@ -1035,6 +1035,7 @@ pub fn build_output_filenames(input: &Input,
                                       .to_str().unwrap().to_string(),
                 single_output_file: ofile,
                 extra: sess.opts.cg.extra_filename.clone(),
+                outputs: sess.opts.output_types.clone(),
             }
         }
     }

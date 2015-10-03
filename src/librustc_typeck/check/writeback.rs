@@ -225,6 +225,10 @@ impl<'cx, 'tcx, 'v> Visitor<'v> for WritebackCx<'cx, 'tcx> {
                 self.visit_ty(&**ty);
                 write_ty_to_tcx(self.tcx(), count_expr.id, self.tcx().types.usize);
             }
+            hir::TyBareFn(ref function_declaration) => {
+                visit::walk_fn_decl_nopat(self, &function_declaration.decl);
+                walk_list!(self, visit_lifetime_def, &function_declaration.lifetimes);
+            }
             _ => visit::walk_ty(self, t)
         }
     }
@@ -384,8 +388,8 @@ impl ResolveReason {
                 tcx.expr_span(upvar_id.closure_expr_id)
             }
             ResolvingClosure(did) => {
-                if did.is_local() {
-                    tcx.expr_span(did.node)
+                if let Some(node_id) = tcx.map.as_local_node_id(did) {
+                    tcx.expr_span(node_id)
                 } else {
                     DUMMY_SP
                 }

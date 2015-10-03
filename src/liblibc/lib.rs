@@ -24,6 +24,7 @@
        html_playground_url = "https://play.rust-lang.org/",
        issue_tracker_base_url = "https://github.com/rust-lang/rust/issues/")]
 #![cfg_attr(test, feature(test))]
+#![feature(cfg_target_vendor)]
 
 //! Bindings for the C standard library and other platform libraries
 //!
@@ -143,7 +144,10 @@ pub use funcs::bsd43::*;
 
 // On NaCl, these libraries are static. Thus it would be a Bad Idea to link them
 // in when creating a test crate.
-#[cfg(not(any(windows, target_env = "musl", all(target_os = "nacl", test))))]
+#[cfg(not(any(windows,
+              target_env = "musl",
+              all(target_os = "nacl", test),
+              all(target_os = "netbsd", target_vendor = "rumprun"))))]
 #[link(name = "c")]
 #[link(name = "m")]
 extern {}
@@ -1683,10 +1687,12 @@ pub mod types {
             pub mod posix01 {
                 use types::common::c95::{c_void};
                 use types::common::c99::{uint32_t, uint64_t};
-                use types::os::arch::c95::{c_int, c_uint, c_long, time_t};
+                use types::os::arch::c95::{c_long, time_t};
                 use types::os::arch::posix88::{dev_t, gid_t};
                 use types::os::arch::posix88::{mode_t, off_t};
                 use types::os::arch::posix88::{uid_t};
+                #[cfg(target_os = "netbsd")]
+                use types::os::arch::c95::{c_int, c_uint};
 
                 pub type nlink_t = uint32_t;
                 pub type blksize_t = uint32_t;
@@ -3895,6 +3901,8 @@ pub mod consts {
             pub const MAP_POPULATE : c_int = 0x08000;
             pub const MAP_NONBLOCK : c_int = 0x010000;
             pub const MAP_STACK : c_int = 0x020000;
+
+            pub const PATH_MAX: c_int = 4096;
         }
         #[cfg(any(target_arch = "mips",
                   target_arch = "mipsel"))]
@@ -3922,6 +3930,8 @@ pub mod consts {
             pub const MAP_POPULATE : c_int = 0x010000;
             pub const MAP_NONBLOCK : c_int = 0x020000;
             pub const MAP_STACK : c_int = 0x040000;
+
+            pub const PATH_MAX: c_int = 4096;
         }
         #[cfg(target_os = "linux")]
         pub mod sysconf {

@@ -57,7 +57,7 @@ use rustc::metadata::csearch;
 use rustc::metadata::decoder::{DefLike, DlDef, DlField, DlImpl};
 use rustc::middle::def::*;
 use rustc::middle::def_id::DefId;
-use rustc::middle::pat_util::pat_bindings;
+use rustc::middle::pat_util::pat_bindings_hygienic;
 use rustc::middle::privacy::*;
 use rustc::middle::subst::{ParamSpace, FnSpace, TypeSpace};
 use rustc::middle::ty::{Freevar, FreevarMap, TraitMap, GlobMap};
@@ -65,7 +65,7 @@ use rustc::util::nodemap::{NodeMap, DefIdSet, FnvHashMap};
 use rustc::util::lev_distance::lev_distance;
 
 use syntax::ast;
-use syntax::ast::{Ident, Name, NodeId, CrateNum, TyIs, TyI8, TyI16, TyI32, TyI64};
+use syntax::ast::{CRATE_NODE_ID, Ident, Name, NodeId, CrateNum, TyIs, TyI8, TyI16, TyI32, TyI64};
 use syntax::ast::{TyUs, TyU8, TyU16, TyU32, TyU64, TyF64, TyF32};
 use syntax::attr::AttrMetaMethods;
 use syntax::ext::mtwt;
@@ -1188,8 +1188,9 @@ impl<'a, 'tcx> Resolver<'a, 'tcx> {
            make_glob_map: MakeGlobMap) -> Resolver<'a, 'tcx> {
         let graph_root = NameBindings::new();
 
+        let root_def_id = ast_map.local_def_id(CRATE_NODE_ID);
         graph_root.define_module(NoParentLink,
-                                 Some(DefId { krate: 0, node: 0 }),
+                                 Some(root_def_id),
                                  NormalModuleKind,
                                  false,
                                  true,
@@ -1257,8 +1258,8 @@ impl<'a, 'tcx> Resolver<'a, 'tcx> {
     }
 
     fn get_trait_name(&self, did: DefId) -> Name {
-        if did.is_local() {
-            self.ast_map.expect_item(did.node).name
+        if let Some(node_id) = self.ast_map.as_local_node_id(did) {
+            self.ast_map.expect_item(node_id).name
         } else {
             csearch::get_trait_name(&self.session.cstore, did)
         }
@@ -1981,7 +1982,7 @@ impl<'a, 'tcx> Resolver<'a, 'tcx> {
                 self.session.span_bug(span,
                     &format!("unexpected {:?} in bindings", def))
             }
-            DefLocal(node_id) => {
+            DefLocal(_, node_id) => {
                 for rib in ribs {
                     match rib.kind {
                         NormalRibKind => {
@@ -1989,11 +1990,12 @@ impl<'a, 'tcx> Resolver<'a, 'tcx> {
                         }
                         ClosureRibKind(function_id) => {
                             let prev_def = def;
+                            let node_def_id = self.ast_map.local_def_id(node_id);
 
                             let mut seen = self.freevars_seen.borrow_mut();
                             let seen = seen.entry(function_id).or_insert_with(|| NodeMap());
                             if let Some(&index) = seen.get(&node_id) {
-                                def = DefUpvar(node_id, index, function_id);
+                                def = DefUpvar(node_def_id, node_id, index, function_id);
                                 continue;
                             }
                             let mut freevars = self.freevars.borrow_mut();
@@ -2002,7 +2004,7 @@ impl<'a, 'tcx> Resolver<'a, 'tcx> {
                             let depth = vec.len();
                             vec.push(Freevar { def: prev_def, span: span });
 
-                            def = DefUpvar(node_id, depth, function_id);
+                            def = DefUpvar(node_def_id, node_id, depth, function_id);
                             seen.insert(node_id, depth);
                         }
                         ItemRibKind | MethodRibKind => {
@@ -2156,9 +2158,10 @@ impl<'a, 'tcx> Resolver<'a, 'tcx> {
                                                                TypeSpace,
                                                                ItemRibKind),
                                              |this| {
-                    this.with_self_rib(DefSelfTy(Some(DefId::local(item.id)), None), |this| {
+                    let local_def_id = this.ast_map.local_def_id(item.id);
+                    this.with_self_rib(DefSelfTy(Some(local_def_id), None), |this| {
                         this.visit_generics(generics);
-                        visit::walk_ty_param_bounds_helper(this, bounds);
+                        walk_list!(this, visit_ty_param_bound, bounds);
 
                         for trait_item in trait_items {
                             match trait_item.node {
@@ -2280,7 +2283,7 @@ impl<'a, 'tcx> Resolver<'a, 'tcx> {
                     function_type_rib.bindings.insert(name,
                         DlDef(DefTyParam(space,
                                          index as u32,
-                                         DefId::local(type_parameter.id),
+                                         self.ast_map.local_def_id(type_parameter.id),
                                          name)));
                 }
                 self.type_ribs.push(function_type_rib);
@@ -2542,10 +2545,10 @@ impl<'a, 'tcx> Resolver<'a, 'tcx> {
 
     fn resolve_local(&mut self, local: &Local) {
         // Resolve the type.
-        visit::walk_ty_opt(self, &local.ty);
+        walk_list!(self, visit_ty, &local.ty);
 
         // Resolve the initializer.
-        visit::walk_expr_opt(self, &local.init);
+        walk_list!(self, visit_expr, &local.init);
 
         // Resolve the pattern.
         self.resolve_pattern(&*local.pat,
@@ -2559,7 +2562,7 @@ impl<'a, 'tcx> Resolver<'a, 'tcx> {
     // user and one 'x' came from the macro.
     fn binding_mode_map(&mut self, pat: &Pat) -> BindingMap {
         let mut result = HashMap::new();
-        pat_bindings(&self.def_map, pat, |binding_mode, _id, sp, path1| {
+        pat_bindings_hygienic(&self.def_map, pat, |binding_mode, _id, sp, path1| {
             let name = mtwt::resolve(path1.node);
             result.insert(name, BindingInfo {
                 span: sp,
@@ -2622,7 +2625,7 @@ impl<'a, 'tcx> Resolver<'a, 'tcx> {
         // pat_idents are variants
         self.check_consistent_bindings(arm);
 
-        visit::walk_expr_opt(self, &arm.guard);
+        walk_list!(self, visit_expr, &arm.guard);
         self.visit_expr(&*arm.body);
 
         if !self.resolved {
@@ -2815,7 +2818,8 @@ impl<'a, 'tcx> Resolver<'a, 'tcx> {
                             debug!("(resolving pattern) binding `{}`",
                                    renamed);
 
-                            let def = DefLocal(pattern.id);
+                            let def_id = self.ast_map.local_def_id(pattern.id);
+                            let def = DefLocal(def_id, pattern.id);
 
                             // Record the definition so that later passes
                             // will be able to distinguish variants from
@@ -3497,8 +3501,8 @@ impl<'a, 'tcx> Resolver<'a, 'tcx> {
         }
 
         fn is_static_method(this: &Resolver, did: DefId) -> bool {
-            if did.is_local() {
-                let sig = match this.ast_map.get(did.node) {
+            if let Some(node_id) = this.ast_map.as_local_node_id(did) {
+                let sig = match this.ast_map.get(node_id) {
                     hir_map::NodeTraitItem(trait_item) => match trait_item.node {
                         hir::MethodTraitItem(ref sig, _) => sig,
                         _ => return false
@@ -3710,7 +3714,7 @@ impl<'a, 'tcx> Resolver<'a, 'tcx> {
                                 false // Stop advancing
                             });
 
-                            if method_scope && special_names::self_ == path_name {
+                            if method_scope && special_names::self_.as_str() == &path_name[..] {
                                 resolve_error(
                                     self,
                                     expr.span,
@@ -3845,9 +3849,8 @@ impl<'a, 'tcx> Resolver<'a, 'tcx> {
         fn add_trait_info(found_traits: &mut Vec<DefId>,
                           trait_def_id: DefId,
                           name: Name) {
-            debug!("(adding trait info) found trait {}:{} for method '{}'",
-                trait_def_id.krate,
-                trait_def_id.node,
+            debug!("(adding trait info) found trait {:?} for method '{}'",
+                trait_def_id,
                 name);
             found_traits.push(trait_def_id);
         }

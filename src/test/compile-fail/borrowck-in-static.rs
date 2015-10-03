@@ -1,4 +1,4 @@
-// Copyright 2014 The Rust Project Developers. See the COPYRIGHT
+// Copyright 2015 The Rust Project Developers. See the COPYRIGHT
 // file at the top-level directory of this distribution and at
 // http://rust-lang.org/COPYRIGHT.
 //
@@ -8,12 +8,15 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![crate_type = "rlib"]
+// check that borrowck looks inside consts/statics
 
-extern {
-    fn some_c_symbol();
-}
+static FN : &'static (Fn() -> (Box<Fn()->Box<i32>>) + Sync) = &|| {
+    let x = Box::new(0);
+    Box::new(|| x) //~ ERROR cannot move out of captured outer variable
+};
 
-pub fn foo() {
-    unsafe { some_c_symbol() }
+fn main() {
+    let f = (FN)();
+    f();
+    f();
 }

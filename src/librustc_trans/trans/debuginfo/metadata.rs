@@ -324,8 +324,8 @@ impl<'tcx> TypeMap<'tcx> {
                                             output: &mut String) {
             // First, find out the 'real' def_id of the type. Items inlined from
             // other crates have to be mapped back to their source.
-            let source_def_id = if def_id.is_local() {
-                match cx.external_srcs().borrow().get(&def_id.node).cloned() {
+            let source_def_id = if let Some(node_id) = cx.tcx().map.as_local_node_id(def_id) {
+                match cx.external_srcs().borrow().get(&node_id).cloned() {
                     Some(source_def_id) => {
                         // The given def_id identifies the inlined copy of a
                         // type definition, let's take the source of the copy.
@@ -346,7 +346,7 @@ impl<'tcx> TypeMap<'tcx> {
 
             output.push_str(crate_hash.as_str());
             output.push_str("/");
-            output.push_str(&format!("{:x}", def_id.node));
+            output.push_str(&format!("{:x}", def_id.index.as_usize()));
 
             // Maybe check that there is no self type here.
 
@@ -1887,7 +1887,8 @@ pub fn create_global_var_metadata(cx: &CrateContext,
     let is_local_to_unit = is_node_local_to_unit(cx, node_id);
     let variable_type = cx.tcx().node_id_to_type(node_id);
     let type_metadata = type_metadata(cx, variable_type, span);
-    let namespace_node = namespace_for_item(cx, DefId::local(node_id));
+    let node_def_id = cx.tcx().map.local_def_id(node_id);
+    let namespace_node = namespace_for_item(cx, node_def_id);
     let var_name = name.to_string();
     let linkage_name =
         namespace_node.mangled_name_of_contained_item(&var_name[..]);
@@ -1925,7 +1926,7 @@ pub fn create_local_var_metadata(bcx: Block, local: &hir::Local) {
     let def_map = &cx.tcx().def_map;
     let locals = bcx.fcx.lllocals.borrow();
 
-    pat_util::pat_bindings(def_map, &*local.pat, |_, node_id, span, var_ident| {
+    pat_util::pat_bindings(def_map, &*local.pat, |_, node_id, span, var_name| {
         let datum = match locals.get(&node_id) {
             Some(datum) => datum,
             None => {
@@ -1943,7 +1944,7 @@ pub fn create_local_var_metadata(bcx: Block, local: &hir::Local) {
         let scope_metadata = scope_metadata(bcx.fcx, node_id, span);
 
         declare_local(bcx,
-                      var_ident.node.name,
+                      var_name.node,
                       datum.ty,
                       scope_metadata,
                       VariableAccess::DirectVariable { alloca: datum.val },
@@ -2105,7 +2106,7 @@ pub fn create_argument_metadata(bcx: Block, arg: &hir::Arg) {
                          .fn_metadata;
     let locals = bcx.fcx.lllocals.borrow();
 
-    pat_util::pat_bindings(def_map, &*arg.pat, |_, node_id, span, var_ident| {
+    pat_util::pat_bindings(def_map, &*arg.pat, |_, node_id, span, var_name| {
         let datum = match locals.get(&node_id) {
             Some(v) => v,
             None => {
@@ -2132,7 +2133,7 @@ pub fn create_argument_metadata(bcx: Block, arg: &hir::Arg) {
         };
 
         declare_local(bcx,
-                      var_ident.node.name,
+                      var_name.node,
                       datum.ty,
                       scope_metadata,
                       VariableAccess::DirectVariable { alloca: datum.val },

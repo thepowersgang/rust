@@ -8,9 +8,19 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-// The rust-book JavaScript in string form.
-
-pub static JAVASCRIPT: &'static str = r#"
-<script type="text/javascript" src="rust-book.js"></script>
-<script type="text/javascript" src="playpen.js"></script>
-"#;
+use std::ops::Add;
+fn show(z: i32) {
+    println!("{}", z)
+}
+fn main() {
+    let x = 23;
+    let y = 42;
+    show(Add::add( x,  y));
+    show(Add::add( x, &y));
+    show(Add::add(&x,  y));
+    show(Add::add(&x, &y));
+    show( x +  y);
+    show( x + &y);
+    show(&x +  y);
+    show(&x + &y);
+}

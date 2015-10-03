@@ -83,9 +83,10 @@ use self::TupleArgumentsFlag::*;
 use astconv::{self, ast_region_to_region, ast_ty_to_ty, AstConv, PathParamMode};
 use check::_match::pat_ctxt;
 use fmt_macros::{Parser, Piece, Position};
+use metadata::cstore::LOCAL_CRATE;
 use middle::astconv_util::prohibit_type_params;
 use middle::def;
-use middle::def_id::{DefId, LOCAL_CRATE};
+use middle::def_id::DefId;
 use middle::infer;
 use middle::infer::type_variable;
 use middle::pat_util::{self, pat_id_map};
@@ -376,6 +377,11 @@ impl<'a, 'tcx> Visitor<'tcx> for CheckItemTypesVisitor<'a, 'tcx> {
             hir::TyFixedLengthVec(_, ref expr) => {
                 check_const_in_type(self.ccx, &**expr, self.ccx.tcx.types.usize);
             }
+            hir::TyBareFn(ref function_declaration) => {
+                visit::walk_fn_decl_nopat(self, &function_declaration.decl);
+                walk_list!(self, visit_lifetime_def, &function_declaration.lifetimes);
+                return
+            }
             _ => {}
         }
 
@@ -431,9 +437,11 @@ pub fn check_item_bodies(ccx: &CrateCtxt) {
 }
 
 pub fn check_drop_impls(ccx: &CrateCtxt) {
-    for drop_method_did in ccx.tcx.destructors.borrow().iter() {
-        if drop_method_did.is_local() {
-            let drop_impl_did = ccx.tcx.map.get_parent_did(drop_method_did.node);
+    let drop_trait = match ccx.tcx.lang_items.drop_trait() {
+        Some(id) => ccx.tcx.lookup_trait_def(id), None => { return }
+    };
+    drop_trait.for_each_impl(ccx.tcx, |drop_impl_did| {
+        if drop_impl_did.is_local() {
             match dropck::check_drop_impl(ccx.tcx, drop_impl_did) {
                 Ok(()) => {}
                 Err(()) => {
@@ -441,7 +449,7 @@ pub fn check_drop_impls(ccx: &CrateCtxt) {
                 }
             }
         }
-    }
+    });
 
     ccx.tcx.sess.abort_if_errors();
 }
@@ -557,6 +565,10 @@ impl<'a, 'tcx> Visitor<'tcx> for GatherLocalsVisitor<'a, 'tcx> {
             hir::TyFixedLengthVec(ref ty, ref count_expr) => {
                 self.visit_ty(&**ty);
                 check_expr_with_hint(self.fcx, &**count_expr, self.fcx.tcx().types.usize);
+            }
+            hir::TyBareFn(ref function_declaration) => {
+                visit::walk_fn_decl_nopat(self, &function_declaration.decl);
+                walk_list!(self, visit_lifetime_def, &function_declaration.lifetimes);
             }
             _ => visit::walk_ty(self, t)
         }
@@ -676,15 +688,15 @@ pub fn check_struct(ccx: &CrateCtxt, id: ast::NodeId, span: Span) {
 
     check_representable(tcx, span, id, "struct");
 
-    if tcx.lookup_simd(DefId::local(id)) {
+    if tcx.lookup_simd(ccx.tcx.map.local_def_id(id)) {
         check_simd(tcx, span, id);
     }
 }
 
 pub fn check_item_type<'a,'tcx>(ccx: &CrateCtxt<'a,'tcx>, it: &'tcx hir::Item) {
-    debug!("check_item_type(it.id={}, it.ident={})",
+    debug!("check_item_type(it.id={}, it.name={})",
            it.id,
-           ccx.tcx.item_path_str(DefId::local(it.id)));
+           ccx.tcx.item_path_str(ccx.tcx.map.local_def_id(it.id)));
     let _indenter = indenter();
     match it.node {
       // Consts can play a role in type-checking, so they are included here.
@@ -699,7 +711,7 @@ pub fn check_item_type<'a,'tcx>(ccx: &CrateCtxt<'a,'tcx>, it: &'tcx hir::Item) {
       hir::ItemFn(..) => {} // entirely within check_item_body
       hir::ItemImpl(_, _, _, _, _, ref impl_items) => {
           debug!("ItemImpl {} with id {}", it.name, it.id);
-          match ccx.tcx.impl_trait_ref(DefId::local(it.id)) {
+          match ccx.tcx.impl_trait_ref(ccx.tcx.map.local_def_id(it.id)) {
               Some(impl_trait_ref) => {
                 check_impl_items_against_trait(ccx,
                                                it.span,
@@ -730,7 +742,7 @@ pub fn check_item_type<'a,'tcx>(ccx: &CrateCtxt<'a,'tcx>, it: &'tcx hir::Item) {
             }
         } else {
             for item in &m.items {
-                let pty = ccx.tcx.lookup_item_type(DefId::local(item.id));
+                let pty = ccx.tcx.lookup_item_type(ccx.tcx.map.local_def_id(item.id));
                 if !pty.generics.types.is_empty() {
                     span_err!(ccx.tcx.sess, item.span, E0044,
                         "foreign items may not have type parameters");
@@ -750,20 +762,20 @@ pub fn check_item_type<'a,'tcx>(ccx: &CrateCtxt<'a,'tcx>, it: &'tcx hir::Item) {
 }
 
 pub fn check_item_body<'a,'tcx>(ccx: &CrateCtxt<'a,'tcx>, it: &'tcx hir::Item) {
-    debug!("check_item_body(it.id={}, it.ident={})",
+    debug!("check_item_body(it.id={}, it.name={})",
            it.id,
-           ccx.tcx.item_path_str(DefId::local(it.id)));
+           ccx.tcx.item_path_str(ccx.tcx.map.local_def_id(it.id)));
     let _indenter = indenter();
     match it.node {
       hir::ItemFn(ref decl, _, _, _, _, ref body) => {
-        let fn_pty = ccx.tcx.lookup_item_type(DefId::local(it.id));
+        let fn_pty = ccx.tcx.lookup_item_type(ccx.tcx.map.local_def_id(it.id));
         let param_env = ParameterEnvironment::for_item(ccx.tcx, it.id);
         check_bare_fn(ccx, &**decl, &**body, it.id, it.span, fn_pty.ty, param_env);
       }
       hir::ItemImpl(_, _, _, _, _, ref impl_items) => {
         debug!("ItemImpl {} with id {}", it.name, it.id);
 
-        let impl_pty = ccx.tcx.lookup_item_type(DefId::local(it.id));
+        let impl_pty = ccx.tcx.lookup_item_type(ccx.tcx.map.local_def_id(it.id));
 
         for impl_item in impl_items {
             match impl_item.node {
@@ -781,7 +793,7 @@ pub fn check_item_body<'a,'tcx>(ccx: &CrateCtxt<'a,'tcx>, it: &'tcx hir::Item) {
         }
       }
       hir::ItemTrait(_, _, _, ref trait_items) => {
-        let trait_def = ccx.tcx.lookup_trait_def(DefId::local(it.id));
+        let trait_def = ccx.tcx.lookup_trait_def(ccx.tcx.map.local_def_id(it.id));
         for trait_item in trait_items {
             match trait_item.node {
                 hir::ConstTraitItem(_, Some(ref expr)) => {
@@ -838,7 +850,7 @@ fn check_trait_on_unimplemented<'a, 'tcx>(ccx: &CrateCtxt<'a, 'tcx>,
                         Position::ArgumentNamed(s) if s == "Self" => (),
                         // So is `{A}` if A is a type parameter
                         Position::ArgumentNamed(s) => match types.iter().find(|t| {
-                            t.name == s
+                            t.name.as_str() == s
                         }) {
                             Some(_) => (),
                             None => {
@@ -900,7 +912,7 @@ fn check_impl_items_against_trait<'a, 'tcx>(ccx: &CrateCtxt<'a, 'tcx>,
     // Check existing impl methods to see if they are both present in trait
     // and compatible with trait signature
     for impl_item in impl_items {
-        let ty_impl_item = ccx.tcx.impl_or_trait_item(DefId::local(impl_item.id));
+        let ty_impl_item = ccx.tcx.impl_or_trait_item(ccx.tcx.map.local_def_id(impl_item.id));
         let ty_trait_item = trait_items.iter()
             .find(|ac| ac.name() == ty_impl_item.name())
             .unwrap_or_else(|| {
@@ -978,7 +990,6 @@ fn check_impl_items_against_trait<'a, 'tcx>(ccx: &CrateCtxt<'a, 'tcx>,
 
     // Check for missing items from trait
     let provided_methods = tcx.provided_trait_methods(impl_trait_ref.def_id);
-    let associated_consts = tcx.associated_consts(impl_trait_ref.def_id);
     let mut missing_items = Vec::new();
     let mut invalidated_items = Vec::new();
     let associated_type_overridden = overridden_associated_type.is_some();
@@ -993,9 +1004,8 @@ fn check_impl_items_against_trait<'a, 'tcx>(ccx: &CrateCtxt<'a, 'tcx>,
                         _ => false,
                     }
                 });
-                let is_provided =
-                    associated_consts.iter().any(|ac| ac.default.is_some() &&
-                                                 ac.name == associated_const.name);
+                let is_provided = associated_const.has_value;
+
                 if !is_implemented {
                     if !is_provided {
                         missing_items.push(associated_const.name);
@@ -1547,21 +1557,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
 
     pub fn to_ty(&self, ast_t: &hir::Ty) -> Ty<'tcx> {
         let t = ast_ty_to_ty(self, self, ast_t);
-
-        // Generally speaking, we must check that types entered by the
-        // user are well-formed. This is not true for `_`, since those
-        // types are generated by inference. Now, you might think that
-        // we could as well generate a WF obligation -- but
-        // unfortunately that breaks code like `foo as *const _`,
-        // because those type variables wind up being unconstrained
-        // until very late. Nasty. Probably it'd be best to refactor
-        // that code path, but that's tricky because of
-        // defaults. Argh!
-        match ast_t.node {
-            hir::TyInfer => { }
-            _ => { self.register_wf_obligation(t, ast_t.span, traits::MiscObligation); }
-        }
-
+        self.register_wf_obligation(t, ast_t.span, traits::MiscObligation);
         t
     }
 
@@ -1944,7 +1940,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                             .unwrap_or(type_variable::Default {
                                 ty: self.infcx().next_ty_var(),
                                 origin_span: codemap::DUMMY_SP,
-                                def_id: DefId::local(0) // what do I put here?
+                                def_id: self.tcx().map.local_def_id(0) // what do I put here?
                             });
 
                     // This is to ensure that we elimnate any non-determinism from the error
@@ -3212,31 +3208,16 @@ fn check_expr_with_unifier<'a, 'tcx, F>(fcx: &FnCtxt<'a, 'tcx>,
     let tcx = fcx.ccx.tcx;
     let id = expr.id;
     match expr.node {
-      hir::ExprBox(ref opt_place, ref subexpr) => {
-          opt_place.as_ref().map(|place|check_expr(fcx, &**place));
-          check_expr(fcx, &**subexpr);
-
-          let mut checked = false;
-          opt_place.as_ref().map(|place| match place.node {
-              hir::ExprPath(None, ref path) => {
-                  // FIXME(pcwalton): For now we hardcode the only permissible
-                  // place: the exchange heap.
-                  let definition = lookup_full_def(tcx, path.span, place.id);
-                  let def_id = definition.def_id();
-                  let referent_ty = fcx.expr_ty(&**subexpr);
-                  if tcx.lang_items.exchange_heap() == Some(def_id) {
-                      fcx.write_ty(id, tcx.mk_box(referent_ty));
-                      checked = true
-                  }
-              }
-              _ => {}
-          });
-
-          if !checked {
-              span_err!(tcx.sess, expr.span, E0066,
-                  "only the exchange heap is currently supported");
-              fcx.write_ty(id, tcx.types.err);
-          }
+      hir::ExprBox(ref subexpr) => {
+        let expected_inner = expected.to_option(fcx).map_or(NoExpectation, |ty| {
+            match ty.sty {
+                ty::TyBox(ty) => Expectation::rvalue_hint(tcx, ty),
+                _ => NoExpectation
+            }
+        });
+        check_expr_with_expectation(fcx, subexpr, expected_inner);
+        let referent_ty = fcx.expr_ty(&**subexpr);
+        fcx.write_ty(id, tcx.mk_box(referent_ty));
       }
 
       hir::ExprLit(ref lit) => {
@@ -3250,24 +3231,14 @@ fn check_expr_with_unifier<'a, 'tcx, F>(fcx: &FnCtxt<'a, 'tcx>,
         op::check_binop_assign(fcx, expr, op, lhs, rhs);
       }
       hir::ExprUnary(unop, ref oprnd) => {
-        let expected_inner = expected.to_option(fcx).map_or(NoExpectation, |ty| {
-            match unop {
-                hir::UnUniq => match ty.sty {
-                    ty::TyBox(ty) => {
-                        Expectation::rvalue_hint(tcx, ty)
-                    }
-                    _ => {
-                        NoExpectation
-                    }
-                },
-                hir::UnNot | hir::UnNeg => {
-                    expected
-                }
-                hir::UnDeref => {
-                    NoExpectation
-                }
+        let expected_inner = match unop {
+            hir::UnNot | hir::UnNeg => {
+                expected
             }
-        });
+            hir::UnDeref => {
+                NoExpectation
+            }
+        };
         let lvalue_pref = match unop {
             hir::UnDeref => lvalue_pref,
             _ => NoPreference
@@ -3278,9 +3249,6 @@ fn check_expr_with_unifier<'a, 'tcx, F>(fcx: &FnCtxt<'a, 'tcx>,
 
         if !oprnd_t.references_error() {
             match unop {
-                hir::UnUniq => {
-                    oprnd_t = tcx.mk_box(oprnd_t);
-                }
                 hir::UnDeref => {
                     oprnd_t = structurally_resolved_type(fcx, expr.span, oprnd_t);
                     oprnd_t = match oprnd_t.builtin_deref(true, NoPreference) {
@@ -3375,7 +3343,7 @@ fn check_expr_with_unifier<'a, 'tcx, F>(fcx: &FnCtxt<'a, 'tcx>,
           } else if let Some(hir::QSelf { position: 0, .. }) = *maybe_qself {
                 // Create some fake resolution that can't possibly be a type.
                 def::PathResolution {
-                    base_def: def::DefMod(DefId::local(ast::CRATE_NODE_ID)),
+                    base_def: def::DefMod(tcx.map.local_def_id(ast::CRATE_NODE_ID)),
                     last_private: LastMod(AllPublic),
                     depth: path.segments.len()
                 }
@@ -4127,7 +4095,7 @@ fn check_const<'a,'tcx>(ccx: &CrateCtxt<'a,'tcx>,
     let inh = static_inherited_fields(ccx, &tables);
     let rty = ccx.tcx.node_id_to_type(id);
     let fcx = blank_fn_ctxt(ccx, &inh, ty::FnConverging(rty), e.id);
-    let declty = fcx.ccx.tcx.lookup_item_type(DefId::local(id)).ty;
+    let declty = fcx.ccx.tcx.lookup_item_type(ccx.tcx.map.local_def_id(id)).ty;
     check_const_with_ty(&fcx, sp, e, declty);
 }
 
@@ -4143,8 +4111,13 @@ fn check_const_with_ty<'a, 'tcx>(fcx: &FnCtxt<'a, 'tcx>,
 
     check_expr_with_hint(fcx, e, declty);
     demand::coerce(fcx, e.span, declty, e);
-    fcx.select_all_obligations_or_error();
+
+    fcx.select_all_obligations_and_apply_defaults();
+    upvar::closure_analyze_const(&fcx, e);
+    fcx.select_obligations_where_possible();
     fcx.check_casts();
+    fcx.select_all_obligations_or_error();
+
     regionck::regionck_expr(fcx, e);
     writeback::resolve_type_vars_in_expr(fcx, e);
 }
@@ -4255,7 +4228,7 @@ pub fn check_enum_variants<'a,'tcx>(ccx: &CrateCtxt<'a,'tcx>,
             }
         }
 
-        let def_id = DefId::local(id);
+        let def_id = ccx.tcx.map.local_def_id(id);
 
         let variants = &ccx.tcx.lookup_adt_def(def_id).variants;
         for (v, variant) in vs.iter().zip(variants.iter()) {
@@ -4266,7 +4239,8 @@ pub fn check_enum_variants<'a,'tcx>(ccx: &CrateCtxt<'a,'tcx>,
                 Some(i) => {
                     span_err!(ccx.tcx.sess, v.span, E0081,
                         "discriminant value `{}` already exists", disr_vals[i]);
-                    span_note!(ccx.tcx.sess, ccx.tcx.map.span(variants[i].did.node),
+                    let variant_i_node_id = ccx.tcx.map.as_local_node_id(variants[i].did).unwrap();
+                    span_note!(ccx.tcx.sess, ccx.tcx.map.span(variant_i_node_id),
                         "conflicting discriminant here")
                 }
                 None => {}
@@ -4293,8 +4267,8 @@ pub fn check_enum_variants<'a,'tcx>(ccx: &CrateCtxt<'a,'tcx>,
         }
     }
 
-    let hint = *ccx.tcx.lookup_repr_hints(DefId { krate: LOCAL_CRATE, node: id })
-        .get(0).unwrap_or(&attr::ReprAny);
+    let def_id = ccx.tcx.map.local_def_id(id);
+    let hint = *ccx.tcx.lookup_repr_hints(def_id).get(0).unwrap_or(&attr::ReprAny);
 
     if hint != attr::ReprAny && vs.len() <= 1 {
         if vs.len() == 1 {
@@ -4317,7 +4291,7 @@ fn type_scheme_and_predicates_for_def<'a, 'tcx>(fcx: &FnCtxt<'a, 'tcx>,
                                                 defn: def::Def)
                                                 -> (TypeScheme<'tcx>, GenericPredicates<'tcx>) {
     match defn {
-        def::DefLocal(nid) | def::DefUpvar(nid, _, _) => {
+        def::DefLocal(_, nid) | def::DefUpvar(_, nid, _, _) => {
             let typ = fcx.local_ty(sp, nid);
             (ty::TypeScheme { generics: ty::Generics::empty(), ty: typ },
              ty::GenericPredicates::empty())
@@ -4335,7 +4309,6 @@ fn type_scheme_and_predicates_for_def<'a, 'tcx>(fcx: &FnCtxt<'a, 'tcx>,
         def::DefMod(..) |
         def::DefForeignMod(..) |
         def::DefUse(..) |
-        def::DefRegion(..) |
         def::DefLabel(..) |
         def::DefSelfTy(..) => {
             fcx.ccx.tcx.sess.span_bug(sp, &format!("expected value, found {:?}", defn));
@@ -4506,7 +4479,6 @@ pub fn instantiate_path<'a, 'tcx>(fcx: &FnCtxt<'a, 'tcx>,
         def::DefForeignMod(..) |
         def::DefLocal(..) |
         def::DefUse(..) |
-        def::DefRegion(..) |
         def::DefLabel(..) |
         def::DefUpvar(..) => {
             segment_spaces = vec![None; segments.len()];

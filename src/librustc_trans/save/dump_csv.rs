@@ -235,7 +235,8 @@ impl <'l, 'tcx> DumpCsvVisitor<'l, 'tcx> {
         }
         let def = self.tcx.def_map.borrow().get(&ref_id).unwrap().full_def();
         match def {
-            def::DefPrimTy(_) => None,
+            def::DefPrimTy(..) => None,
+            def::DefSelfTy(..) => None,
             _ => Some(def.def_id()),
         }
     }
@@ -257,14 +258,13 @@ impl <'l, 'tcx> DumpCsvVisitor<'l, 'tcx> {
             def::DefStatic(_, _) |
             def::DefConst(_) |
             def::DefAssociatedConst(..) |
-            def::DefLocal(_) |
+            def::DefLocal(..) |
             def::DefVariant(_, _, _) |
             def::DefUpvar(..) => Some(recorder::VarRef),
 
             def::DefFn(..) => Some(recorder::FnRef),
 
             def::DefSelfTy(..) |
-            def::DefRegion(_) |
             def::DefLabel(_) |
             def::DefTyParam(..) |
             def::DefUse(_) |
@@ -444,7 +444,7 @@ impl <'l, 'tcx> DumpCsvVisitor<'l, 'tcx> {
 
     fn process_const(&mut self,
                      id: ast::NodeId,
-                     ident: &ast::Ident,
+                     name: ast::Name,
                      span: Span,
                      typ: &ast::Ty,
                      expr: &ast::Expr) {
@@ -456,7 +456,7 @@ impl <'l, 'tcx> DumpCsvVisitor<'l, 'tcx> {
         self.fmt.static_str(span,
                             sub_span,
                             id,
-                            &ident.name.as_str(),
+                            &name.as_str(),
                             &qualname,
                             &self.span.snippet(expr.span),
                             &ty_to_string(&*typ),
@@ -721,7 +721,7 @@ impl <'l, 'tcx> DumpCsvVisitor<'l, 'tcx> {
                     }
                 }
             }
-            def::DefLocal(_) |
+            def::DefLocal(..) |
             def::DefStatic(_,_) |
             def::DefConst(..) |
             def::DefAssociatedConst(..) |
@@ -771,7 +771,7 @@ impl <'l, 'tcx> DumpCsvVisitor<'l, 'tcx> {
             }
         }
 
-        visit::walk_expr_opt(self, base)
+        walk_list!(self, visit_expr, base);
     }
 
     fn process_method_call(&mut self, ex: &ast::Expr, args: &Vec<P<ast::Expr>>) {
@@ -785,7 +785,7 @@ impl <'l, 'tcx> DumpCsvVisitor<'l, 'tcx> {
         }
 
         // walk receiver and args
-        visit::walk_exprs(self, &args);
+        walk_list!(self, visit_expr, args);
     }
 
     fn process_pat(&mut self, p: &ast::Pat) {
@@ -988,7 +988,7 @@ impl<'l, 'tcx, 'v> Visitor<'v> for DumpCsvVisitor<'l, 'tcx> {
     fn visit_trait_item(&mut self, trait_item: &ast::TraitItem) {
         match trait_item.node {
             ast::ConstTraitItem(ref ty, Some(ref expr)) => {
-                self.process_const(trait_item.id, &trait_item.ident,
+                self.process_const(trait_item.id, trait_item.ident.name,
                                    trait_item.span, &*ty, &*expr);
             }
             ast::MethodTraitItem(ref sig, ref body) => {
@@ -1006,7 +1006,7 @@ impl<'l, 'tcx, 'v> Visitor<'v> for DumpCsvVisitor<'l, 'tcx> {
     fn visit_impl_item(&mut self, impl_item: &ast::ImplItem) {
         match impl_item.node {
             ast::ConstImplItem(ref ty, ref expr) => {
-                self.process_const(impl_item.id, &impl_item.ident,
+                self.process_const(impl_item.id, impl_item.ident.name,
                                    impl_item.span, &ty, &expr);
             }
             ast::MethodImplItem(ref sig, ref body) => {
@@ -1170,7 +1170,7 @@ impl<'l, 'tcx, 'v> Visitor<'v> for DumpCsvVisitor<'l, 'tcx> {
             }
             let def = def_map.get(&id).unwrap().full_def();
             match def {
-                def::DefLocal(id) => {
+                def::DefLocal(_, id) => {
                     let value = if immut == ast::MutImmutable {
                         self.span.snippet(p.span).to_string()
                     } else {
@@ -1200,7 +1200,7 @@ impl<'l, 'tcx, 'v> Visitor<'v> for DumpCsvVisitor<'l, 'tcx> {
         for &(id, ref path, ref_kind) in &paths_to_process {
             self.process_path(id, path, ref_kind);
         }
-        visit::walk_expr_opt(self, &arm.guard);
+        walk_list!(self, visit_expr, &arm.guard);
         self.visit_expr(&arm.body);
     }
 
@@ -1246,7 +1246,7 @@ impl<'l, 'tcx, 'v> Visitor<'v> for DumpCsvVisitor<'l, 'tcx> {
         }
 
         // Just walk the initialiser and type (don't want to walk the pattern again).
-        visit::walk_ty_opt(self, &l.ty);
-        visit::walk_expr_opt(self, &l.init);
+        walk_list!(self, visit_ty, &l.ty);
+        walk_list!(self, visit_expr, &l.init);
     }
 }
