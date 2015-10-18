@@ -8,18 +8,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-// A quick test of 'unsafe const fn' functionality
+// compile-flags: -Z parse-only
 
-#![feature(const_fn)]
-
-unsafe const fn dummy(v: u32) -> u32 {
+unsafe const unsafe fn dummy(v: u32) -> u32 {	//~ ERROR: expected `fn`, found `unsafe`
     !v
 }
 
-// Called without an unsafe block
-const VAL: u32 = dummy(0xFFFF); //~ ERROR E0133
-
 fn main() {
-    assert_eq!(VAL, 0xFFFF0000);
 }
-

@@ -4369,7 +4369,8 @@ impl<'a> Parser<'a> {
     /// true if we are looking at `const ID`, false for things like `const fn` etc
     pub fn is_const_item(&mut self) -> bool {
         self.token.is_keyword(keywords::Const) &&
-            !self.look_ahead(1, |t| t.is_keyword(keywords::Fn))
+            !self.look_ahead(1, |t| t.is_keyword(keywords::Fn)) &&
+            !self.look_ahead(1, |t| t.is_keyword(keywords::Unsafe))
     }
 
     /// parses all the "front matter" for a `fn` declaration, up to
@@ -4380,8 +4381,9 @@ impl<'a> Parser<'a> {
     /// - `extern fn`
     /// - etc
     pub fn parse_fn_front_matter(&mut self) -> PResult<(ast::Constness, ast::Unsafety, abi::Abi)> {
-        let unsafety = try!(self.parse_unsafety());
         let is_const_fn = try!(self.eat_keyword(keywords::Const));
+        let unsafety = try!(self.parse_unsafety());
+        let is_const_fn = is_const_fn || try!(self.eat_keyword(keywords::Const));
         let (constness, unsafety, abi) = if is_const_fn {
             (Constness::Const, unsafety, abi::Rust)
         } else {
@@ -5291,11 +5293,17 @@ impl<'a> Parser<'a> {
             return Ok(Some(item));
         }
         if try!(self.eat_keyword(keywords::Const) ){
-            if self.check_keyword(keywords::Fn) {
+            if self.check_keyword(keywords::Unsafe) || self.check_keyword(keywords::Fn) {
+                let unsafety = if try!(self.eat_keyword(keywords::Unsafe)) {
+                        Unsafety::Unsafe
+                    }
+                    else {
+                        Unsafety::Normal
+                    };
                 // CONST FUNCTION ITEM
                 try!(self.bump());
                 let (ident, item_, extra_attrs) =
-                    try!(self.parse_item_fn(Unsafety::Normal, Constness::Const, abi::Rust));
+                    try!(self.parse_item_fn(unsafety, Constness::Const, abi::Rust));
                 let last_span = self.last_span;
                 let item = self.mk_item(lo,
                                         last_span.hi,
