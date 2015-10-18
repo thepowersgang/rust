@@ -10,7 +10,7 @@
 
 // compile-flags: -Z parse-only
 
-unsafe const unsafe fn dummy(v: u32) -> u32 {	//~ ERROR: expected `fn`, found `unsafe`
+unsafe const unsafe fn dummy(v: u32) -> u32 { //~ ERROR: expected `fn`, found `unsafe`
     !v
 }
 
