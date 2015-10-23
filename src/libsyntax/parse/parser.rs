@@ -5293,7 +5293,9 @@ impl<'a> Parser<'a> {
             return Ok(Some(item));
         }
         if try!(self.eat_keyword(keywords::Const) ){
-            if self.check_keyword(keywords::Unsafe) || self.check_keyword(keywords::Fn) {
+            if (self.check_keyword(keywords::Unsafe) && self.look_ahead(1, |t| t.is_keyword(keywords::Fn)) ) ||
+                self.check_keyword(keywords::Fn)
+            {
                 let unsafety = if try!(self.eat_keyword(keywords::Unsafe)) {
                         Unsafety::Unsafe
                     }
