@@ -370,18 +370,21 @@ impl<'a, 'b> Context<'a, 'b> {
                         parse::ArgumentNamed(n) => Position::Named( String::from(n) ),
                     }
                     ;
+                let (precision, width) = {
+                    // - Transator for width/precision
+                    let mut translate_count = |count|
+                        match count
+                        {
+                        parse::Count::CountImplied => Count::None,
+                        parse::Count::CountIs(v) => Count::Lit(v),
+                        parse::Count::CountIsNextParam => Count::Arg( translate_pos(parse::ArgumentNext) ),
+                        parse::Count::CountIsParam(i) => Count::Arg( translate_pos(parse::ArgumentIs(i)) ),
+                        parse::Count::CountIsName(n) => Count::Arg( translate_pos(parse::ArgumentNamed(n)) ),
+                        }
+                        ;
+                    (translate_count(arg.format.precision), translate_count(arg.format.width))
+                    };
                 let arg_pos = translate_pos(arg.position);
-                // - Transator for width/precision
-                let mut translate_count = |count|
-                    match count
-                    {
-                    parse::Count::CountImplied => Count::None,
-                    parse::Count::CountIs(v) => Count::Lit(v),
-                    parse::Count::CountIsNextParam => Count::Arg( translate_pos(parse::ArgumentNext) ),
-                    parse::Count::CountIsParam(i) => Count::Arg( translate_pos(parse::ArgumentIs(i)) ),
-                    parse::Count::CountIsName(n) => Count::Arg( translate_pos(parse::ArgumentNamed(n)) ),
-                    }
-                    ;
                 Some(Piece {
                     arg: arg_pos,
                     ty: String::from(arg.format.ty),
@@ -389,8 +392,8 @@ impl<'a, 'b> Context<'a, 'b> {
                     flags: arg.format.flags,
                     alignment: align,
                     fill: arg.format.fill,
-                    precision: translate_count(arg.format.precision),
-                    width: translate_count(arg.format.width),
+                    precision: precision,
+                    width: width,
                     })
             }
         }

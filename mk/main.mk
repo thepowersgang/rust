@@ -154,6 +154,9 @@ endif
 ifdef TRACE
   CFG_RUSTC_FLAGS += -Z trace
 endif
+ifdef CODEGEN_UNITS
+  CFG_RUSTC_FLAGS += -C codegen-units=$(CODEGEN_UNITS)
+endif
 ifdef CFG_ENABLE_RPATH
 CFG_RUSTC_FLAGS += -C rpath
 endif
