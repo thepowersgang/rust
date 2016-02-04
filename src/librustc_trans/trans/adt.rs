@@ -153,6 +153,7 @@ pub struct Struct<'tcx> {
     pub sized: bool,
     pub packed: bool,
     pub fields: Vec<Ty<'tcx>>,
+    real_offsets: Vec<usize>,   // Real field offsets, indexed by original index
 }
 
 #[derive(Copy, Clone)]
@@ -268,9 +269,12 @@ fn represent_type_uncached<'a, 'tcx>(cx: &CrateContext<'a, 'tcx>,
                                      t: Ty<'tcx>) -> Repr<'tcx> {
     match t.sty {
         ty::TyTuple(ref elems) => {
-            Univariant(mk_struct(cx, &elems[..], false, t), 0)
+            Univariant(mk_struct(cx, &elems[..], false, attr::ReprExtern, t), 0)
         }
         ty::TyStruct(def, substs) => {
+            let hint = *cx.tcx().lookup_repr_hints(def.did).get(0)
+                .unwrap_or(&attr::ReprAny);
+
             let mut ftys = def.struct_variant().fields.iter().map(|field| {
                 monomorphize::field_ty(cx.tcx(), substs, field)
             }).collect::<Vec<_>>();
@@ -284,10 +288,10 @@ fn represent_type_uncached<'a, 'tcx>(cx: &CrateContext<'a, 'tcx>,
                 ftys.push(cx.tcx().dtor_type());
             }
 
-            Univariant(mk_struct(cx, &ftys[..], packed, t), dtor_to_init_u8(dtor))
+            Univariant(mk_struct(cx, &ftys[..], packed, hint, t), dtor_to_init_u8(dtor))
         }
         ty::TyClosure(_, ref substs) => {
-            Univariant(mk_struct(cx, &substs.upvar_tys, false, t), 0)
+            Univariant(mk_struct(cx, &substs.upvar_tys, false, attr::ReprAny, t), 0)
         }
         ty::TyEnum(def, substs) => {
             let cases = get_cases(cx.tcx(), def, substs);
@@ -301,7 +305,7 @@ fn represent_type_uncached<'a, 'tcx>(cx: &CrateContext<'a, 'tcx>,
                 // (Typechecking will reject discriminant-sizing attrs.)
                 assert_eq!(hint, attr::ReprAny);
                 let ftys = if dtor { vec!(cx.tcx().dtor_type()) } else { vec!() };
-                return Univariant(mk_struct(cx, &ftys[..], false, t),
+                return Univariant(mk_struct(cx, &ftys[..], false, hint, t),
                                   dtor_to_init_u8(dtor));
             }
 
@@ -332,7 +336,7 @@ fn represent_type_uncached<'a, 'tcx>(cx: &CrateContext<'a, 'tcx>,
                 assert_eq!(hint, attr::ReprAny);
                 let mut ftys = cases[0].tys.clone();
                 if dtor { ftys.push(cx.tcx().dtor_type()); }
-                return Univariant(mk_struct(cx, &ftys[..], false, t),
+                return Univariant(mk_struct(cx, &ftys[..], false, hint, t),
                                   dtor_to_init_u8(dtor));
             }
 
@@ -342,7 +346,7 @@ fn represent_type_uncached<'a, 'tcx>(cx: &CrateContext<'a, 'tcx>,
                 while discr < 2 {
                     if cases[1 - discr].is_zerolen(cx, t) {
                         let st = mk_struct(cx, &cases[discr].tys,
-                                           false, t);
+                                           false, hint, t);
                         match cases[discr].find_ptr(cx) {
                             Some(ref df) if df.len() == 1 && st.fields.len() == 1 => {
                                 return RawNullablePointer {
@@ -380,7 +384,7 @@ fn represent_type_uncached<'a, 'tcx>(cx: &CrateContext<'a, 'tcx>,
                 let mut ftys = vec!(ty_of_inttype(cx.tcx(), min_ity));
                 ftys.extend_from_slice(&c.tys);
                 if dtor { ftys.push(cx.tcx().dtor_type()); }
-                mk_struct(cx, &ftys, false, t)
+                mk_struct(cx, &ftys, false, hint, t)
             }).collect();
 
 
@@ -433,7 +437,7 @@ fn represent_type_uncached<'a, 'tcx>(cx: &CrateContext<'a, 'tcx>,
                 let mut ftys = vec!(ty_of_inttype(cx.tcx(), ity));
                 ftys.extend_from_slice(&c.tys);
                 if dtor { ftys.push(cx.tcx().dtor_type()); }
-                mk_struct(cx, &ftys[..], false, t)
+                mk_struct(cx, &ftys[..], false, hint, t)
             }).collect();
 
             ensure_enum_fits_in_address_space(cx, &fields[..], t);
@@ -541,7 +545,7 @@ fn find_discr_field_candidate<'tcx>(tcx: &ty::ctxt<'tcx>,
 
 impl<'tcx> Case<'tcx> {
     fn is_zerolen<'a>(&self, cx: &CrateContext<'a, 'tcx>, scapegoat: Ty<'tcx>) -> bool {
-        mk_struct(cx, &self.tys, false, scapegoat).size == 0
+        mk_struct(cx, &self.tys, false, attr::ReprAny, scapegoat).size == 0
     }
 
     fn find_ptr<'a>(&self, cx: &CrateContext<'a, 'tcx>) -> Option<DiscrField> {
@@ -568,16 +572,45 @@ fn get_cases<'tcx>(tcx: &ty::ctxt<'tcx>,
 }
 
 fn mk_struct<'a, 'tcx>(cx: &CrateContext<'a, 'tcx>,
-                       tys: &[Ty<'tcx>], packed: bool,
+                       tys: &[Ty<'tcx>], packed: bool, hint: Hint,
                        scapegoat: Ty<'tcx>)
                        -> Struct<'tcx> {
     let sized = tys.iter().all(|&ty| type_is_sized(cx.tcx(), ty));
-    let lltys : Vec<Type> = if sized {
+    let mut lltys : Vec<Type> = if sized {
         tys.iter().map(|&ty| type_of::sizing_type_of(cx, ty)).collect()
     } else {
         tys.iter().filter(|&ty| type_is_sized(cx.tcx(), *ty))
            .map(|&ty| type_of::sizing_type_of(cx, ty)).collect()
     };
+
+    let mut tys = tys.to_vec();
+    let real_offsets = if hint == attr::ReprAny && tys.len() > 1 {
+            let last = tys.len() - 1;
+            let mut sorted: Vec<_> = (0 .. tys.len()).collect();
+            sorted[..last].sort_by( |&l,&r| {
+                let l_size = machine::llsize_of_alloc(cx, lltys[l]);
+                let r_size = machine::llsize_of_alloc(cx, lltys[r]);
+                Ord::cmp( &l_size, &r_size )
+                });
+            tys[..last].sort_by( |&l,&r| {
+                let l_size = machine::llsize_of_alloc(cx, type_of::sizing_type_of(cx, l));
+                let r_size = machine::llsize_of_alloc(cx, type_of::sizing_type_of(cx, r));
+                Ord::cmp( &l_size, &r_size )
+                });
+            lltys[..last].sort_by( |&l,&r| {
+                let l_size = machine::llsize_of_alloc(cx, l);
+                let r_size = machine::llsize_of_alloc(cx, r);
+                Ord::cmp( &l_size, &r_size )
+                });
+            let mut real_offsets = vec![0; tys.len()];
+            for (i, &idx) in sorted.iter().enumerate() {
+                real_offsets[idx] = i;
+            }
+            real_offsets
+        }
+        else {
+            (0 .. tys.len()).collect()
+        };
 
     ensure_struct_fits_in_address_space(cx, &lltys[..], packed, scapegoat);
 
@@ -587,7 +620,8 @@ fn mk_struct<'a, 'tcx>(cx: &CrateContext<'a, 'tcx>,
         align: machine::llalign_of_min(cx, llty_rec),
         sized: sized,
         packed: packed,
-        fields: tys.to_vec(),
+        fields: tys,
+        real_offsets: real_offsets,
     }
 }
 
@@ -1000,6 +1034,7 @@ pub fn trans_case<'blk, 'tcx>(bcx: Block<'blk, 'tcx>, r: &Repr, discr: Disr)
 /// representation.
 pub fn trans_set_discr<'blk, 'tcx>(bcx: Block<'blk, 'tcx>, r: &Repr<'tcx>,
                                    val: ValueRef, discr: Disr) {
+    debug!("trans_set_discr(r={:?}, val_ty(val)={})", r, val_ty(val).to_string());
     match *r {
         CEnum(ity, min, max) => {
             assert_discr_in_range(ity, min, max, discr);
@@ -1070,6 +1105,7 @@ pub fn num_args(r: &Repr, discr: Disr) -> usize {
 /// Access a field, at a point when the value's case is known.
 pub fn trans_field_ptr<'blk, 'tcx>(bcx: Block<'blk, 'tcx>, r: &Repr<'tcx>,
                                    val: MaybeSizedValue, discr: Disr, ix: usize) -> ValueRef {
+    debug!("trans_field_ptr - r={:?}, ix={}", r, ix);
     // Note: if this ever needs to generate conditionals (e.g., if we
     // decide to do some kind of cdr-coding-like non-unique repr
     // someday), it will need to return a possibly-new bcx as well.
@@ -1109,16 +1145,20 @@ pub fn trans_field_ptr<'blk, 'tcx>(bcx: Block<'blk, 'tcx>, r: &Repr<'tcx>,
 
 pub fn struct_field_ptr<'blk, 'tcx>(bcx: Block<'blk, 'tcx>, st: &Struct<'tcx>, val: MaybeSizedValue,
                                     ix: usize, needs_cast: bool) -> ValueRef {
+    debug!("struct_field_ptr - needs_cast = {:?}", needs_cast);
     let ccx = bcx.ccx();
     let ptr_val = if needs_cast {
-        let fields = st.fields.iter().map(|&ty| {
-            type_of::in_memory_type_of(ccx, ty)
-        }).collect::<Vec<_>>();
+        let fields: Vec<_> = st.fields.iter()
+            .map(|&i| type_of::in_memory_type_of(ccx, i))
+            .collect();
         let real_ty = Type::struct_(ccx, &fields[..], st.packed);
         PointerCast(bcx, val.value, real_ty.ptr_to())
     } else {
         val.value
     };
+
+    debug!("struct_field_ptr - Idx {} is actually {}", ix, st.real_offsets[ix]);
+    let ix = st.real_offsets[ix];
 
     let fty = st.fields[ix];
     // Simple case - we can just GEP the field
@@ -1126,6 +1166,7 @@ pub fn struct_field_ptr<'blk, 'tcx>(bcx: Block<'blk, 'tcx>, st: &Struct<'tcx>, v
     //   * Packed struct - There is no alignment padding
     //   * Field is sized - pointer is properly aligned already
     if ix == 0 || st.packed || type_is_sized(bcx.tcx(), fty) {
+        debug!("struct_field_ptr - Fast ret (ix={},st.packed={:?})", ix, st.packed);
         return StructGEP(bcx, ptr_val, ix);
     }
 
@@ -1368,7 +1409,8 @@ pub fn trans_const<'a, 'tcx>(ccx: &CrateContext<'a, 'tcx>, r: &Repr<'tcx>, discr
 
 /// Compute struct field offsets relative to struct begin.
 fn compute_struct_field_offsets<'a, 'tcx>(ccx: &CrateContext<'a, 'tcx>,
-                                          st: &Struct<'tcx>) -> Vec<u64> {
+                                          st: &Struct<'tcx>,
+                                          vals: &[ValueRef]) -> Vec<(u64, ValueRef)> {
     let mut offsets = vec!();
 
     let mut offset = 0;
@@ -1378,10 +1420,14 @@ fn compute_struct_field_offsets<'a, 'tcx>(ccx: &CrateContext<'a, 'tcx>,
             let type_align = type_of::align_of(ccx, ty);
             offset = roundup(offset, type_align);
         }
-        offsets.push(offset);
+        offsets.push( (offset, ::std::ptr::null_mut()) );
         offset += machine::llsize_of_alloc(ccx, llty);
     }
+    for (&ofs_idx, &val) in Iterator::zip(st.real_offsets.iter(), vals.iter()) {
+        offsets[ofs_idx].1 = val;
+    }
     assert_eq!(st.fields.len(), offsets.len());
+    //st.real_offsets.iter().map(|&i| offsets[i]).collect()
     offsets
 }
 
@@ -1397,24 +1443,32 @@ fn build_const_struct<'a, 'tcx>(ccx: &CrateContext<'a, 'tcx>,
                                 st: &Struct<'tcx>, vals: &[ValueRef])
                                 -> Vec<ValueRef> {
     assert_eq!(vals.len(), st.fields.len());
+    debug!("build_const_struct(st={:?})", st);
 
-    let target_offsets = compute_struct_field_offsets(ccx, st);
+    let target_offsets_and_vals = compute_struct_field_offsets(ccx, st, vals);
+    debug!("target_offsets_and_vals = {:?}", target_offsets_and_vals);
 
     // offset of current value
     let mut offset = 0;
     let mut cfields = Vec::new();
-    for (&val, target_offset) in vals.iter().zip(target_offsets) {
+    for (target_offset, val) in target_offsets_and_vals {
+        debug!("> val_ty={:?}, target_offset={}, offset={}", val_ty(val).to_string(), target_offset, offset);
         if !st.packed {
             let val_align = machine::llalign_of_min(ccx, val_ty(val));
             offset = roundup(offset, val_align);
+            debug!("offset={} (align)", offset);
         }
         if offset != target_offset {
+            assert!(target_offset > offset, "target_offset {} < offset {}, st={:?}",
+                target_offset, offset, st);
             cfields.push(padding(ccx, target_offset - offset));
             offset = target_offset;
+            debug!("offset={} (?)", offset);
         }
         assert!(!is_undef(val));
         cfields.push(val);
         offset += machine::llsize_of_alloc(ccx, val_ty(val));
+        debug!("offset={} (size)", offset);
     }
 
     assert!(st.sized && offset <= st.size);
